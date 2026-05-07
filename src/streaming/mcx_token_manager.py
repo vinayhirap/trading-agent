@@ -431,6 +431,10 @@ class MCXTokenManager:
                 }
             }
 
+    def get_tokens(self) -> dict:
+        """Return raw token dict — delegates to module-level get_tokens()."""
+        return get_tokens()
+
     def force_refresh(self) -> dict:
         """Force immediate token refresh — useful for testing."""
         return refresh_tokens()

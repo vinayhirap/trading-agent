@@ -34,7 +34,7 @@ from fastapi.responses import HTMLResponse, JSONResponse
 from fastapi.staticfiles import StaticFiles
 from fastapi.templating import Jinja2Templates
 
-from config import settings
+from config.settings import settings
 
 # ── Path setup ────────────────────────────────────────────────────────────────
 ROOT = Path(__file__).resolve().parents[1]   # project root
@@ -443,9 +443,14 @@ PAGES = [
     ("trade",     "/trade",       "📟", "Trade",           "Paper and live trade execution"),
     ("alerts",    "/alerts",      "🔔", "Alerts",          "Price and RSI alerts → Telegram"),
     ("portfolio", "/portfolio",   "💼", "Portfolio",       "Paper portfolio P&L and positions"),
-    ("accuracy",  "/accuracy",    "🎯", "Accuracy",        "Prediction vs actual tracking"),
-    ("backtest",  "/backtest",    "📊", "Backtesting",     "Walk-forward backtest engine"),
-    ("status",    "/status",      "⚙️", "System Status",   "Models, APIs, data cache"),
+    ("accuracy",      "/accuracy",      "🎯", "Accuracy",        "Prediction vs actual tracking"),
+    ("backtest",      "/backtest",      "📊", "Backtesting",     "Walk-forward backtest engine"),
+    ("status",        "/status",        "⚙️", "System Status",   "Models, APIs, data cache"),
+    ("nerve_center",  "/nerve-center",  "🧠", "Nerve Center",    "Market heatmap + risk-on/off"),
+    ("fii_dii",       "/fii-dii",       "📡", "FII/DII Tracker", "Institutional flow data"),
+    ("options_oi",    "/options-oi",    "📊", "Options OI",      "PCR, max pain, OI heatmap"),
+    ("regime",        "/regime",        "🔭", "Regime Detector", "HMM market regime analysis"),
+    ("system_health", "/system-health", "🏥", "System Health",   "Modules, models, package status"),
 ]
 
 def page_view(template_name: str):
@@ -695,19 +700,6 @@ async def api_mcx_tokens():
         return {"ok": False, "error": str(e)}
 
 
-# ─────────────────────────────────────────────────────────────────────────────
-# PASTE INTO web/main.py
-# Location: BEFORE  app.include_router(api)
-# Also add these page routes to the existing app.add_route() block:
-#
-#   app.add_route("/nerve-center",  page_view("nerve_center"),  methods=["GET"])
-#   app.add_route("/fii-dii",       page_view("fii_dii"),       methods=["GET"])
-#   app.add_route("/options-oi",    page_view("options_oi"),    methods=["GET"])
-#   app.add_route("/regime",        page_view("regime"),        methods=["GET"])
-#   app.add_route("/system-health", page_view("system_health"), methods=["GET"])
-# ─────────────────────────────────────────────────────────────────────────────
-
-
 # ── API: FII/DII ──────────────────────────────────────────────────────────────
 @api.get("/fii-dii")
 async def api_fii_dii():
@@ -900,7 +892,7 @@ async def api_system_health():
             "name": "Phase 5 — Production (Future)",
             "status": "planned",
             "items": [
-                {"name": "RL Position Sizer (DQN)",     "path": "src/prediction/rl_sizer.py"},
+                {"name": "RL Position Sizer (DQN)",     "path": "src/prediction/rl_position_sizer.py"},
                 {"name": "Event-Driven Architecture",   "path": "src/streaming/event_bus.py"},
                 {"name": "Angel One Live Trading",      "path": "src/brokers/angel_one_live.py"},
             ],

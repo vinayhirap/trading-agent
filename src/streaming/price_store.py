@@ -387,7 +387,7 @@ class PriceStore:
 
     # ── yfinance fallback ─────────────────────────────────────────────────────
 
-        MCX_SYMBOLS_NO_FALLBACK = {
+    MCX_SYMBOLS_NO_FALLBACK = {
         "GOLD", "SILVER", "CRUDEOIL", "COPPER",
         "NATURALGAS", "ZINC", "ALUMINIUM"
     }

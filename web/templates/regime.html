@@ -116,7 +116,7 @@
     {% for regime, cls, icon, strategies, avoid in [
       ("TRENDING UP","r-mini-up","📈",["Trend following entries","Buy breakouts","Hold winners longer","Wider stops"],["Mean reversion shorts","Counter-trend trades"]),
       ("TRENDING DOWN","r-mini-dn","📉",["Short breakdowns","Sell rallies","Tight stops on longs","Defensive hedges"],["Buying dips blindly","New longs without confirmation"]),
-      ("RANGING","r-mini-rg","↔","Buy support / sell resistance","Bollinger band mean reversion","Tighter profit targets","Avoid breakout trades"],["Trend following","Wide stops"]),
+      ("RANGING","r-mini-rg","↔",["Buy support / sell resistance","Bollinger band mean reversion","Tighter profit targets"],["Avoid breakout trades","Trend following","Wide stops"]),
       ("VOLATILE","r-mini-vl","⚡",["Reduce position size","Wait for confirmation","Use wider ATR stops","News-driven momentum"],["Normal-size positions","Breakout trades without confirmation"]),
     ] %}
     <div style="background:var(--bg-3);border-radius:6px;padding:12px">
