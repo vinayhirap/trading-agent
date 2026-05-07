@@ -1,0 +1,494 @@
+# trading-agent/web/main.py
+"""
+AI Trading Agent — FastAPI Web Server
+
+Stack:
+  FastAPI + Uvicorn  (async HTTP + WebSocket)
+  Jinja2             (HTML templates)
+  Alpine.js          (reactive frontend, no build step)
+  TradingView Charts (professional real-time charts)
+
+Run:
+  cd trading-agent
+  python web/main.py
+
+Or production:
+  uvicorn web.main:app --host 0.0.0.0 --port 8010 --reload
+
+Access:
+  Dashboard:  http://localhost:8010
+  API docs:   http://localhost:8010/docs
+  WebSocket:  ws://localhost:8010/ws/prices
+"""
+import sys
+import asyncio
+import json
+import time
+from contextlib import asynccontextmanager
+from pathlib import Path
+from typing import Optional
+
+import uvicorn
+from fastapi import FastAPI, WebSocket, WebSocketDisconnect, Request, HTTPException
+from fastapi.responses import HTMLResponse, JSONResponse
+from fastapi.staticfiles import StaticFiles
+from fastapi.templating import Jinja2Templates
+
+# ── Path setup ────────────────────────────────────────────────────────────────
+ROOT = Path(__file__).resolve().parents[1]   # project root
+WEB  = Path(__file__).resolve().parent       # web/ folder
+
+if str(ROOT) not in sys.path:
+    sys.path.insert(0, str(ROOT))
+
+# ── Background service startup ────────────────────────────────────────────────
+def _start_background_services():
+    """Start all trading system background threads."""
+    import threading, time as t
+
+    def _run():
+        t.sleep(2)
+        try:
+            from src.streaming.price_store import price_store
+            symbols = [
+                "NIFTY50","BANKNIFTY","NIFTYIT","SENSEX",
+                "GOLD","SILVER","CRUDEOIL","COPPER","NATURALGAS",
+                "BTC","ETH","SOL","BNB","XRP",
+                "USDINR","EURUSD","GBPUSD",
+                "RELIANCE","TCS","HDFCBANK","INFY","ICICIBANK",
+                "SBIN","WIPRO","AXISBANK","KOTAKBANK","LT",
+                "BAJFINANCE","MARUTI","SUNPHARMA","BHARTIARTL","TATASTEEL",
+            ]
+            price_store.warm_up(symbols)
+            price_store.start_background_refresh(symbols, interval_seconds=10)
+            print("✅ PriceStore: background refresh started")
+
+            from src.analysis.realtime_advisor import realtime_advisor
+            realtime_advisor.start()
+            print("✅ RealtimeAdvisor: started")
+
+            from src.alerts.daily_summary import summary_scheduler
+            summary_scheduler.start()
+            print("✅ DailySummaryScheduler: started")
+
+            from src.alerts.price_alert_manager import alert_manager
+            alert_manager.start()
+            print("✅ PriceAlertManager: started")
+
+        except Exception as e:
+            print(f"⚠️  Background services: {e}")
+
+    threading.Thread(target=_run, daemon=True, name="BGServices").start()
+
+
+@asynccontextmanager
+async def lifespan(app: FastAPI):
+    """Start background services when server starts."""
+    _start_background_services()
+    yield
+    # Cleanup on shutdown (optional)
+
+
+# ── FastAPI app ────────────────────────────────────────────────────────────────
+app = FastAPI(
+    title       = "AI Trading Agent",
+    description = "Real-time AI-powered trading dashboard for Indian markets",
+    version     = "3.0",
+    lifespan    = lifespan,
+    docs_url    = "/docs",
+    redoc_url   = "/redoc",
+)
+
+# Static files + templates
+# Mount static files only if directory exists
+_static_dir = WEB / "static"
+if _static_dir.exists():
+    app.mount("/static", StaticFiles(directory=_static_dir), name="static")
+templates = Jinja2Templates(directory=WEB / "templates")
+
+
+# ── WebSocket connection manager ──────────────────────────────────────────────
+class ConnectionManager:
+    def __init__(self):
+        self.price_clients:  list[WebSocket] = []
+        self.signal_clients: list[WebSocket] = []
+
+    async def connect_prices(self, ws: WebSocket):
+        await ws.accept()
+        self.price_clients.append(ws)
+
+    async def connect_signals(self, ws: WebSocket):
+        await ws.accept()
+        self.signal_clients.append(ws)
+
+    def disconnect(self, ws: WebSocket):
+        self.price_clients  = [c for c in self.price_clients  if c != ws]
+        self.signal_clients = [c for c in self.signal_clients if c != ws]
+
+    async def broadcast_prices(self, data: dict):
+        msg = json.dumps(data)
+        dead = []
+        for client in self.price_clients:
+            try:
+                await client.send_text(msg)
+            except Exception:
+                dead.append(client)
+        for d in dead:
+            self.price_clients = [c for c in self.price_clients if c != d]
+
+    async def broadcast_signals(self, data: dict):
+        msg = json.dumps(data)
+        dead = []
+        for client in self.signal_clients:
+            try:
+                await client.send_text(msg)
+            except Exception:
+                dead.append(client)
+        for d in dead:
+            self.signal_clients = [c for c in self.signal_clients if c != d]
+
+
+manager = ConnectionManager()
+
+
+# ── Background price broadcaster ──────────────────────────────────────────────
+async def price_broadcast_loop():
+    """Push prices to all connected clients every second."""
+    while True:
+        if manager.price_clients:
+            try:
+                data = await asyncio.get_event_loop().run_in_executor(None, _get_prices)
+                await manager.broadcast_prices(data)
+            except Exception:
+                pass
+        await asyncio.sleep(1)
+
+
+async def signal_broadcast_loop():
+    """Push signals to all connected clients every 30 seconds."""
+    while True:
+        if manager.signal_clients:
+            try:
+                data = await asyncio.get_event_loop().run_in_executor(None, _get_signals)
+                await manager.broadcast_signals(data)
+            except Exception:
+                pass
+        await asyncio.sleep(30)
+
+
+@app.on_event("startup")
+async def startup_event():
+    asyncio.create_task(price_broadcast_loop())
+    asyncio.create_task(signal_broadcast_loop())
+
+
+# ── Data helpers (sync, run in executor) ──────────────────────────────────────
+def _get_prices() -> dict:
+    try:
+        from src.streaming.price_store import (
+            price_store, PRICE_META, ACTIVE_EXPIRY, convert_price
+        )
+        usdinr  = price_store.get("USDINR", fallback=False) or 92.46
+        if not (70 < usdinr < 120):
+            usdinr = 92.46
+        all_raw = price_store.get_all()
+        result  = {}
+        for sym, raw in all_raw.items():
+            if not raw or raw <= 0:
+                continue
+            meta    = PRICE_META.get(sym, {"convert": "usd_to_inr", "label": ""})
+            display = convert_price(sym, raw, usdinr)
+            age     = price_store.age_seconds(sym) or 0
+            result[sym] = {
+                "raw":     round(raw, 4),
+                "display": round(display, 2),
+                "label":   meta.get("label", ""),
+                "convert": meta.get("convert", "none"),
+                "age":     round(age, 1),
+                "stale":   age > 300,
+                "expiry":  ACTIVE_EXPIRY.get(sym, ""),
+            }
+        return {"type": "prices", "usdinr": usdinr, "prices": result}
+    except Exception as e:
+        return {"type": "prices", "usdinr": 92.46, "prices": {}, "error": str(e)}
+
+
+def _get_signals() -> dict:
+    try:
+        from src.analysis.realtime_advisor import realtime_advisor
+        return {"type": "signals", "signals": realtime_advisor.get_all()}
+    except Exception as e:
+        return {"type": "signals", "signals": {}, "error": str(e)}
+
+
+def _market_status() -> dict:
+    try:
+        from src.utils.market_hours import market_hours
+        s = market_hours.get_full_status()
+        return {
+            "nse_open":    s.nse_tradeable,
+            "mcx_open":    s.mcx_tradeable,
+            "is_holiday":  s.is_nse_holiday,
+            "holiday_name":s.holiday_name or "",
+            "secs_to_close":  getattr(s, "secs_to_nse_close", 0),
+            "secs_to_open":   getattr(s, "secs_to_nse_open", 0),
+        }
+    except Exception:
+        return {"nse_open": False, "mcx_open": True, "is_holiday": False, "holiday_name": ""}
+
+
+def _template_context(request: Request) -> dict:
+    """Base context passed to every template."""
+    return {
+        "request":     request,
+        "market":      _market_status(),
+        "usdinr":      92.46,
+    }
+
+
+# ── WebSocket endpoints ───────────────────────────────────────────────────────
+@app.websocket("/ws/prices")
+async def ws_prices(websocket: WebSocket):
+    """
+    Real-time price stream — pushes every 1 second.
+    Message format: { type: "prices", usdinr: 92.46, prices: { NIFTY50: { display, label, age, stale }, ... } }
+    """
+    await manager.connect_prices(websocket)
+    try:
+        # Send immediately on connect
+        data = await asyncio.get_event_loop().run_in_executor(None, _get_prices)
+        await websocket.send_text(json.dumps(data))
+        # Keep alive — broadcaster handles subsequent sends
+        while True:
+            await websocket.receive_text()   # wait for client ping or disconnect
+    except WebSocketDisconnect:
+        manager.disconnect(websocket)
+
+
+@app.websocket("/ws/signals")
+async def ws_signals(websocket: WebSocket):
+    """Real-time signal stream — pushes every 30 seconds."""
+    await manager.connect_signals(websocket)
+    try:
+        data = await asyncio.get_event_loop().run_in_executor(None, _get_signals)
+        await websocket.send_text(json.dumps(data))
+        while True:
+            await websocket.receive_text()
+    except WebSocketDisconnect:
+        manager.disconnect(websocket)
+
+
+# ── Page routes ───────────────────────────────────────────────────────────────
+PAGES = [
+    ("dashboard", "/",            "📊", "Dashboard",       "Market overview, live prices, signals"),
+    ("scanner",   "/scanner",     "🔍", "Signal Scanner",  "Full multi-symbol signal scanner"),
+    ("charts",    "/charts",      "📈", "Charts",          "Live TradingView charts with AI overlay"),
+    ("news",      "/news",        "📰", "News Feed",       "Real-time news with sentiment analysis"),
+    ("crude",     "/crude",       "🛢️", "Crude Intel",     "WTI/Brent analysis + MCX prediction"),
+    ("ai",        "/ai",          "🤖", "AI Insights",     "Ask AI about market conditions"),
+    ("events",    "/events",      "🌍", "Event Monitor",   "Global macro events"),
+    ("timing",    "/timing",      "⏰", "Market Timing",   "Session analysis and intraday patterns"),
+    ("trade",     "/trade",       "📟", "Trade",           "Paper and live trade execution"),
+    ("alerts",    "/alerts",      "🔔", "Alerts",          "Price and RSI alerts → Telegram"),
+    ("portfolio", "/portfolio",   "💼", "Portfolio",       "Paper portfolio P&L and positions"),
+    ("accuracy",  "/accuracy",    "🎯", "Accuracy",        "Prediction vs actual tracking"),
+    ("backtest",  "/backtest",    "📊", "Backtesting",     "Walk-forward backtest engine"),
+    ("status",    "/status",      "⚙️", "System Status",   "Models, APIs, data cache"),
+]
+
+
+def page_view(template_name: str):
+    """Factory for simple page views."""
+    async def view(request: Request):
+        ctx = _template_context(request)
+        ctx["active_page"] = template_name
+        ctx["pages"]       = PAGES
+        return templates.TemplateResponse(f"{template_name}.html", ctx)
+    return view
+
+
+app.add_route("/",          page_view("dashboard"),  methods=["GET"])
+app.add_route("/scanner",   page_view("scanner"),    methods=["GET"])
+app.add_route("/charts",    page_view("charts"),     methods=["GET"])
+app.add_route("/news",      page_view("news"),       methods=["GET"])
+app.add_route("/crude",     page_view("crude"),      methods=["GET"])
+app.add_route("/ai",        page_view("ai"),         methods=["GET"])
+app.add_route("/events",    page_view("events"),     methods=["GET"])
+app.add_route("/timing",    page_view("timing"),     methods=["GET"])
+app.add_route("/trade",     page_view("trade"),      methods=["GET"])
+app.add_route("/alerts",    page_view("alerts"),     methods=["GET"])
+app.add_route("/portfolio", page_view("portfolio"),  methods=["GET"])
+app.add_route("/accuracy",  page_view("accuracy"),   methods=["GET"])
+app.add_route("/backtest",  page_view("backtest"),   methods=["GET"])
+app.add_route("/status",    page_view("status"),     methods=["GET"])
+
+
+# ── REST API ──────────────────────────────────────────────────────────────────
+from fastapi import APIRouter
+api = APIRouter(prefix="/api", tags=["API"])
+
+
+@api.get("/prices")
+async def api_prices():
+    data = await asyncio.get_event_loop().run_in_executor(None, _get_prices)
+    return data
+
+
+@api.get("/signals")
+async def api_signals(symbols: str = "NIFTY50,BANKNIFTY,GOLD,BTC,ETH"):
+    syms = [s.strip().upper() for s in symbols.split(",")]
+    try:
+        from src.analysis.realtime_advisor import realtime_advisor
+        all_sig = realtime_advisor.get_all()
+        return {"ok": True, "signals": {s: all_sig.get(s, {}) for s in syms}}
+    except Exception as e:
+        return {"ok": False, "error": str(e)}
+
+
+@api.get("/market-status")
+async def api_market_status():
+    return {"ok": True, "status": _market_status()}
+
+
+@api.get("/portfolio")
+async def api_portfolio():
+    try:
+        from src.execution.paper_broker import PaperBroker
+        from config.settings import settings
+        broker = PaperBroker(initial_capital=settings.INITIAL_CAPITAL)
+        return {"ok": True, "portfolio": broker.get_portfolio_summary()}
+    except Exception as e:
+        return {"ok": False, "error": str(e)}
+
+
+@api.get("/news")
+async def api_news(limit: int = 20):
+    try:
+        from src.news.news_intelligence import NewsIntelligence
+        ni   = NewsIntelligence()
+        sent = ni.get_market_sentiment()
+        return {"ok": True, "sentiment": sent}
+    except Exception as e:
+        return {"ok": False, "error": str(e)}
+
+
+@api.post("/signal-action")
+async def api_signal_action(request: Request):
+    body   = await request.json()
+    symbol = body.get("symbol", "NIFTY50")
+    try:
+        from src.analysis.realtime_advisor import realtime_advisor
+        return {"ok": True, "signal": realtime_advisor.get(symbol)}
+    except Exception as e:
+        return {"ok": False, "error": str(e)}
+
+
+@api.post("/alert/add")
+async def api_alert_add(request: Request):
+    body = await request.json()
+    try:
+        from src.alerts.price_alert_manager import alert_manager
+        aid = alert_manager.add_alert(
+            symbol     = body["symbol"],
+            alert_type = body["type"],
+            threshold  = float(body["threshold"]),
+            note       = body.get("note", ""),
+            fire_once  = body.get("fire_once", True),
+        )
+        return {"ok": True, "id": aid}
+    except Exception as e:
+        return {"ok": False, "error": str(e)}
+
+
+@api.post("/alert/delete")
+async def api_alert_delete(request: Request):
+    body = await request.json()
+    try:
+        from src.alerts.price_alert_manager import alert_manager
+        ok = alert_manager.delete_alert(body["id"])
+        return {"ok": ok}
+    except Exception as e:
+        return {"ok": False, "error": str(e)}
+
+
+@api.get("/alerts")
+async def api_alerts_list():
+    try:
+        from src.alerts.price_alert_manager import alert_manager
+        return {"ok": True, "alerts": alert_manager.get_alerts()}
+    except Exception as e:
+        return {"ok": False, "error": str(e)}
+
+
+@api.post("/backtest/run")
+async def api_backtest(request: Request):
+    body = await request.json()
+    try:
+        import datetime
+        from src.backtesting.backtest_engine import BacktestEngine
+        from src.backtesting.backtest_report import BacktestReport
+        engine = BacktestEngine(
+            initial_capital = float(body.get("capital", 10000)),
+            risk_per_trade  = float(body.get("risk", 0.01)),
+        )
+        start  = datetime.date.fromisoformat(body["start"])
+        end    = datetime.date.fromisoformat(body["end"])
+        result = await asyncio.get_event_loop().run_in_executor(
+            None, lambda: engine.run(body["symbol"], start, end, verbose=False)
+        )
+        BacktestReport.compute_metrics(result)
+        return {"ok": True, "result": BacktestReport.summary_dict(result)}
+    except Exception as e:
+        return {"ok": False, "error": str(e)}
+
+
+@api.post("/trade/execute")
+async def api_trade_execute(request: Request):
+    body = await request.json()
+    try:
+        import uuid
+        from src.execution.paper_broker import PaperBroker
+        from src.risk.models import TradeOrder, OrderSide, OrderStatus
+        from config.settings import settings
+        broker = PaperBroker(initial_capital=settings.INITIAL_CAPITAL)
+        order  = TradeOrder(
+            order_id     = str(uuid.uuid4())[:8],
+            symbol       = body["symbol"],
+            side         = OrderSide.BUY if body["side"] == "BUY" else OrderSide.SELL,
+            quantity     = int(body["quantity"]),
+            order_type   = "MARKET",
+            status       = OrderStatus.APPROVED,
+            stop_loss    = float(body.get("sl", 0)),
+            target_price = float(body.get("target", 0)),
+            signal       = body.get("signal", "MANUAL"),
+            confidence   = float(body.get("confidence", 0.5)),
+        )
+        record = broker.execute(order, current_price=float(body["price"]))
+        return {"ok": True, "fill_price": record.fill_price, "charges": record.total_charges}
+    except Exception as e:
+        return {"ok": False, "error": str(e)}
+
+
+app.include_router(api)
+
+
+# ── Entry point ───────────────────────────────────────────────────────────────
+if __name__ == "__main__":
+    print("""
+╔══════════════════════════════════════════════════════╗
+║  AI Trading Agent — FastAPI Dashboard                ║
+║                                                      ║
+║  Dashboard:  http://localhost:8010                   ║
+║  API Docs:   http://localhost:8010/docs              ║
+║  WebSocket:  ws://localhost:8010/ws/prices           ║
+╚══════════════════════════════════════════════════════╝
+    """)
+    uvicorn.run(
+        "web.main:app",
+        host       = "0.0.0.0",
+        port       = 8010,
+        reload     = False,    # set True for development
+        log_level  = "info",
+        ws_ping_interval = 20,
+        ws_ping_timeout  = 20,
+    )

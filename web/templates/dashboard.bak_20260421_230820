@@ -1,0 +1,278 @@
+{% extends "base.html" %}
+{% block title %}Dashboard — AI Trading Agent{% endblock %}
+
+{% block content %}
+<div class="page-hd">
+  <div>
+    <div class="page-title">Market Overview</div>
+    <div class="page-sub">Live prices · AI signals · Portfolio · <span class="live"></span> Real-time</div>
+  </div>
+  <div class="page-actions">
+    <span class="dim mono" id="refresh-time" style="font-size:11px">—</span>
+    <button class="btn btn-ghost btn-sm" onclick="refreshAll()">↻ Refresh</button>
+  </div>
+</div>
+
+<!-- KPI row — filled by WebSocket -->
+<div class="kpi-row" id="kpi-row">
+  {% for sym in ["NIFTY50","BANKNIFTY","NIFTYIT","GOLD","CRUDEOIL","BTC","ETH"] %}
+  <div class="kpi" id="kpi-{{ sym }}">
+    <div class="kpi-lbl">{{ sym }}</div>
+    <div class="kpi-val" id="kpi-v-{{ sym }}">—</div>
+    <div class="kpi-sub" id="kpi-s-{{ sym }}">Loading…</div>
+  </div>
+  {% endfor %}
+</div>
+
+<!-- Main 2-col grid -->
+<div class="g2" style="margin-bottom:14px">
+
+  <!-- Signal cards -->
+  <div class="card">
+    <div class="card-hd">
+      Live Signals
+      <a href="/scanner" class="btn btn-ghost btn-sm">Full Scanner →</a>
+    </div>
+    <div style="display:grid;grid-template-columns:1fr 1fr;gap:8px" id="sig-grid">
+      {% for sym in ["NIFTY50","BANKNIFTY","GOLD","CRUDEOIL","BTC","ETH","NIFTYIT","SILVER"] %}
+      <div class="sig-card" id="sc-{{ sym }}">
+        <div style="display:flex;justify-content:space-between;align-items:flex-start">
+          <div>
+            <div class="sig-sym">{{ sym }}</div>
+            <div class="sig-px" id="scpx-{{ sym }}">—</div>
+          </div>
+          <div id="scrgm-{{ sym }}"></div>
+        </div>
+        <div class="sig-badge b-hold" id="scbdg-{{ sym }}">—</div>
+        <div class="conf-track"><div class="conf-fill hold" id="sccnf-{{ sym }}" style="width:0"></div></div>
+        <div class="sig-tags">
+          <span class="tag" id="scrsi-{{ sym }}">RSI —</span>
+          <span class="tag" id="scadx-{{ sym }}">ADX —</span>
+          <span class="tag" id="scsess-{{ sym }}">—</span>
+        </div>
+      </div>
+      {% endfor %}
+    </div>
+  </div>
+
+  <!-- Right panel -->
+  <div class="gap">
+
+    <!-- Portfolio -->
+    <div class="card">
+      <div class="card-hd">Paper Portfolio <a href="/portfolio" class="btn btn-ghost btn-sm">View →</a></div>
+      <div class="g2">
+        <div>
+          <div class="kpi-lbl">Portfolio Value</div>
+          <div class="kpi-val" id="pf-val" style="font-size:17px">—</div>
+        </div>
+        <div>
+          <div class="kpi-lbl">Total P&L</div>
+          <div class="kpi-val" id="pf-pnl" style="font-size:17px">—</div>
+        </div>
+        <div>
+          <div class="kpi-lbl">Cash</div>
+          <div class="kpi-val" id="pf-cash" style="font-size:14px">—</div>
+        </div>
+        <div>
+          <div class="kpi-lbl">Open Positions</div>
+          <div class="kpi-val" id="pf-pos" style="font-size:14px">—</div>
+        </div>
+      </div>
+    </div>
+
+    <!-- Market status card -->
+    <div class="card">
+      <div class="card-hd">Market Status</div>
+      <div style="display:flex;flex-direction:column;gap:10px">
+        {% set rows = [
+          ("NSE / BSE", market.nse_open),
+          ("MCX Commodities", market.mcx_open),
+        ] %}
+        {% for label, is_open in rows %}
+        <div style="display:flex;justify-content:space-between;align-items:center">
+          <span class="dim" style="font-size:12px">{{ label }}</span>
+          {% if is_open %}
+          <span class="mkt-badge open" style="font-size:9px;padding:3px 9px"><span class="pulse-dot"></span>OPEN</span>
+          {% else %}
+          <span class="mkt-badge closed" style="font-size:9px;padding:3px 9px"><span class="pulse-dot"></span>CLOSED</span>
+          {% endif %}
+        </div>
+        {% endfor %}
+        <div style="display:flex;justify-content:space-between;align-items:center">
+          <span class="dim" style="font-size:12px">Crypto 24×7</span>
+          <span class="mkt-badge open" style="font-size:9px;padding:3px 9px"><span class="pulse-dot"></span>OPEN</span>
+        </div>
+        <div class="divider"></div>
+        <div style="display:flex;justify-content:space-between">
+          <span class="dim" style="font-size:11px">USDINR</span>
+          <span class="mono up" id="usdinr-card" style="font-size:12px">₹{{ "%.4f"|format(usdinr) }}</span>
+        </div>
+        {% if market.is_holiday %}
+        <div style="background:var(--gold-dim);border:1px solid rgba(255,170,0,.3);border-radius:5px;padding:8px 10px;font-size:11px;color:var(--gold)">
+          🏖️ Holiday: {{ market.holiday_name }}
+        </div>
+        {% endif %}
+      </div>
+    </div>
+
+  </div>
+</div>
+
+<!-- Signals table -->
+<div class="card">
+  <div class="card-hd">
+    All Markets — Signal Table
+    <div style="display:flex;gap:6px">
+      <span id="sig-count" class="dim" style="font-size:10px;align-self:center"></span>
+      <button class="btn btn-ghost btn-sm" onclick="loadSignals()">↻</button>
+    </div>
+  </div>
+  <div class="tbl-wrap">
+    <table>
+      <thead>
+        <tr>
+          <th>Symbol</th><th>Price</th><th>Action</th>
+          <th>Confidence</th><th>Regime</th>
+          <th>Session</th><th>Timing</th><th>RSI</th>
+        </tr>
+      </thead>
+      <tbody id="sig-tbody">
+        <tr><td colspan="8" style="text-align:center;padding:24px;color:var(--txt-3)">
+          <div style="display:flex;align-items:center;justify-content:center;gap:8px">
+            <div class="spin"></div> Loading signals…
+          </div>
+        </td></tr>
+      </tbody>
+    </table>
+  </div>
+</div>
+{% endblock %}
+
+{% block extra_js %}
+<script>
+const WATCHLIST = ["NIFTY50","BANKNIFTY","NIFTYIT","GOLD","SILVER","CRUDEOIL","BTC","ETH"];
+let kpiPrev = {};
+
+/* ── WebSocket price → KPI tiles ──────────────────────── */
+window.addEventListener("prices", (e) => {
+  const { prices, usdinr } = e.detail;
+
+  for (const sym of WATCHLIST) {
+    const info = prices[sym]; if (!info) continue;
+    const vEl  = document.getElementById("kpi-v-"+sym); if (!vEl) continue;
+    const str  = fmtDisplay(sym, info.display, info.label);
+    if (vEl.textContent !== str) {
+      vEl.textContent = str;
+      const dir = kpiPrev[sym] !== undefined ? (info.display > kpiPrev[sym] ? "up" : "dn") : "";
+      if (dir) { vEl.className = "kpi-val "+dir; setTimeout(() => vEl.className="kpi-val", 600); }
+    }
+    kpiPrev[sym] = info.display;
+
+    const sEl = document.getElementById("kpi-s-"+sym);
+    if (sEl) sEl.textContent = info.age < 60 ? `${info.age}s ago` : "stale";
+  }
+
+  const uEl = document.getElementById("usdinr-card");
+  if (uEl && usdinr) uEl.textContent = "₹" + usdinr.toFixed(4);
+});
+
+/* ── Load signals ──────────────────────────────────────── */
+const REGIME_CLS = { TRENDING_UP:"r-up", TRENDING_DOWN:"r-dn", RANGING:"r-rg", VOLATILE:"r-vl" };
+const REGIME_LBL = { TRENDING_UP:"📈 Trending ↑", TRENDING_DOWN:"📉 Trending ↓", RANGING:"↔ Ranging", VOLATILE:"⚡ Volatile" };
+
+async function loadSignals() {
+  const syms = WATCHLIST.concat(["RELIANCE","TCS","SBIN","INFY"]).join(",");
+  const data = await api(`/api/signals?symbols=${syms}`);
+  if (!data.ok) return;
+  const sigs = data.signals;
+
+  // Update signal cards
+  for (const sym of WATCHLIST) {
+    const s = sigs[sym]; if (!s) continue;
+    const rec  = (s.recommended_instrument||s.action||"HOLD").toUpperCase();
+    const conf = Math.round((s.confidence||0.5)*100);
+    const isBuy  = rec.includes("BUY")||rec.includes("CALL");
+    const isSell = rec.includes("SELL")||rec.includes("PUT");
+    const cls    = isBuy?"buy":isSell?"sell":"hold";
+
+    const card = document.getElementById("sc-"+sym);
+    if (card) card.className = `sig-card ${cls}`;
+
+    const bdg  = document.getElementById("scbdg-"+sym);
+    if (bdg) { bdg.textContent=rec; bdg.className=`sig-badge ${isBuy?"b-buy":isSell?"b-sell":"b-hold"}`; }
+
+    const cnf = document.getElementById("sccnf-"+sym);
+    if (cnf) { cnf.style.width=`${conf}%`; cnf.className=`conf-fill ${cls}`; }
+
+    const rgm = document.getElementById("scrgm-"+sym);
+    if (rgm && s.regime) {
+      const rc = REGIME_CLS[s.regime]||"r-rg";
+      rgm.innerHTML = `<span class="regime ${rc}">${REGIME_LBL[s.regime]||s.regime}</span>`;
+    }
+
+    const price = s.price ? fmtDisplay(sym, s.price * (["BTC","ETH","SOL"].includes(sym) ? (data.usdinr||92.46) : 1), "") : "—";
+    const setEl = (id, txt) => { const el=document.getElementById(id+"-"+sym); if(el) el.textContent=txt; };
+    setEl("scpx", price);
+    setEl("scrsi", s.rsi ? `RSI ${s.rsi}` : "RSI —");
+    setEl("scadx", s.adx ? `ADX ${s.adx}` : "ADX —");
+    setEl("scsess", s.session_label || "—");
+  }
+
+  // Update table
+  const allSyms = Object.keys(sigs);
+  document.getElementById("sig-count").textContent = `${allSyms.length} symbols`;
+  document.getElementById("sig-tbody").innerHTML = allSyms.map(sym => {
+    const s = sigs[sym]; if (!s) return "";
+    const rec   = (s.recommended_instrument||s.action||"—").toUpperCase();
+    const conf  = Math.round((s.confidence||0.5)*100);
+    const isBuy = rec.includes("BUY")||rec.includes("CALL");
+    const isSell= rec.includes("SELL")||rec.includes("PUT");
+    const aCls  = isBuy?"up":isSell?"dn":"";
+    const regime= s.regime||"";
+    const rCls  = REGIME_CLS[regime]||"r-rg";
+    const rLbl  = REGIME_LBL[regime]||regime.replace(/_/g," ");
+    const price = s.price ? `₹${(s.price||0).toLocaleString("en-IN",{maximumFractionDigits:2})}` : "—";
+    return `<tr>
+      <td class="ui">${sym}</td>
+      <td>${price}</td>
+      <td class="${aCls}" style="font-weight:700">${rec}</td>
+      <td><div style="display:flex;align-items:center;gap:6px">
+        <div style="width:44px;height:2px;background:var(--bg-4);border-radius:2px">
+          <div style="width:${conf}%;height:100%;background:${isBuy?"var(--green)":isSell?"var(--red)":"var(--txt-3)"};border-radius:2px"></div>
+        </div>
+        <span class="dim">${conf}%</span>
+      </div></td>
+      <td><span class="regime ${rCls}">${rLbl}</span></td>
+      <td class="dim" style="font-family:var(--font);font-size:11px">${s.session_label||"—"}</td>
+      <td class="dim" style="font-family:var(--font);font-size:11px">${s.entry_timing||"—"}</td>
+      <td>${s.rsi||"—"}</td>
+    </tr>`;
+  }).join("");
+  document.getElementById("refresh-time").textContent = "Updated " + new Date().toLocaleTimeString();
+}
+
+/* ── Load portfolio ────────────────────────────────────── */
+async function loadPortfolio() {
+  const data = await api("/api/portfolio");
+  if (!data.ok||!data.portfolio) return;
+  const p   = data.portfolio;
+  const pnl = p.total_pnl || 0;
+  const fmt = v => v>=100000 ? `₹${(v/100000).toFixed(2)}L` : `₹${(v||0).toLocaleString("en-IN",{maximumFractionDigits:0})}`;
+  const set = (id, v) => { const e=document.getElementById(id); if(e) e.textContent=v; };
+  set("pf-val",  fmt(p.total_value||10000));
+  set("pf-cash", fmt(p.cash||0));
+  set("pf-pos",  (p.n_positions||0)+" open");
+  const pEl = document.getElementById("pf-pnl");
+  if (pEl) {
+    pEl.textContent = (pnl>=0?"+":"")+fmt(Math.abs(pnl));
+    pEl.className   = "kpi-val "+(pnl>=0?"up":"dn");
+  }
+}
+
+function refreshAll() { loadSignals(); loadPortfolio(); }
+refreshAll();
+setInterval(loadSignals,   30000);
+setInterval(loadPortfolio, 60000);
+</script>
+{% endblock %}

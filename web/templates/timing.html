@@ -1,0 +1,230 @@
+{% extends "base.html" %}
+{% block title %}Market Timing — AI Trading Agent{% endblock %}
+
+{% block extra_css %}
+.session-row{display:flex;align-items:center;gap:12px;padding:10px 12px;border-radius:6px;background:var(--bg-3);margin-bottom:6px}
+.session-dot{width:10px;height:10px;border-radius:50%;flex-shrink:0}
+.session-dot.active{animation:pulse 2s infinite}
+.timing-grid{display:grid;grid-template-columns:repeat(24,1fr);gap:2px;margin-top:8px}
+.timing-cell{height:20px;border-radius:2px;background:var(--bg-4);position:relative;cursor:default}
+.timing-cell.active-session{background:var(--green-dim);border:1px solid rgba(0,232,122,.2)}
+.timing-cell.overlap{background:rgba(0,232,122,.3);border:1px solid rgba(0,232,122,.4)}
+.timing-cell.current{background:var(--green)!important;box-shadow:0 0 6px var(--green)}
+{% endblock %}
+
+{% block content %}
+<div class="page-hd">
+  <div>
+    <div class="page-title">Market Timing</div>
+    <div class="page-sub">Session analysis · Intraday patterns · NSE / MCX / Crypto hours · IST</div>
+  </div>
+  <div class="page-actions">
+    <span class="mono" style="font-size:13px;color:var(--green)" id="ist-now">—</span>
+  </div>
+</div>
+
+<!-- Current session status -->
+<div class="kpi-row" style="grid-template-columns:repeat(4,1fr);margin-bottom:18px">
+  <div class="kpi">
+    <div class="kpi-lbl">NSE / BSE</div>
+    <div class="kpi-val" id="nse-status">
+      {% if market.nse_open %}<span class="up">OPEN</span>{% else %}<span class="dn">CLOSED</span>{% endif %}
+    </div>
+    <div class="kpi-sub">9:15 AM – 3:30 PM IST</div>
+  </div>
+  <div class="kpi">
+    <div class="kpi-lbl">MCX Commodities</div>
+    <div class="kpi-val" id="mcx-status">
+      {% if market.mcx_open %}<span class="up">OPEN</span>{% else %}<span class="dn">CLOSED</span>{% endif %}
+    </div>
+    <div class="kpi-sub">9:00 AM – 11:30 PM IST</div>
+  </div>
+  <div class="kpi">
+    <div class="kpi-lbl">Crypto</div>
+    <div class="kpi-val up">24 × 7</div>
+    <div class="kpi-sub">Always open</div>
+  </div>
+  <div class="kpi">
+    <div class="kpi-lbl">{% if market.secs_to_close > 0 %}Closes In{% else %}Opens In{% endif %}</div>
+    <div class="kpi-val mono" id="countdown-val">—</div>
+    <div class="kpi-sub" id="countdown-lbl">—</div>
+  </div>
+</div>
+
+<div class="g2">
+  <!-- Session timeline -->
+  <div class="gap">
+    <div class="card">
+      <div class="card-hd">Active Sessions (IST)</div>
+      {% for sess in [
+        ("Pre-Market NSE","8:45 – 9:15 AM","#8855ff","Pre-open session, price discovery"),
+        ("NSE / BSE Regular","9:15 AM – 3:30 PM","#00e87a","Main equity trading window"),
+        ("MCX Morning","9:00 AM – 5:00 PM","#ffaa00","Agri & base metals session"),
+        ("MCX Evening","5:00 PM – 11:30 PM","#ffaa00","International metals & energy"),
+        ("US Pre-Market","6:00 – 9:30 PM IST","#4488ff","US market preparation"),
+        ("NYSE / NASDAQ","7:00 PM – 1:30 AM IST","#4488ff","US equity session overlap"),
+        ("Crypto Global","00:00 – 23:59","#ff3366","Continuous worldwide trading"),
+      ] %}
+      <div class="session-row" id="sess-{{ loop.index }}">
+        <div class="session-dot" style="background:{{ sess[2] }}"></div>
+        <div style="flex:1">
+          <div style="font-size:12px;font-weight:600;color:var(--txt)">{{ sess[0] }}</div>
+          <div style="font-size:10px;color:var(--txt-3)">{{ sess[1] }} · {{ sess[3] }}</div>
+        </div>
+        <span id="sess-badge-{{ loop.index }}" class="sent-badge sent-neu" style="font-size:8px">—</span>
+      </div>
+      {% endfor %}
+    </div>
+
+    <div class="card">
+      <div class="card-hd">24h Session Map (IST Hours)</div>
+      <div style="display:flex;justify-content:space-between;margin-bottom:4px">
+        {% for h in range(0,24,3) %}
+        <span style="font-size:9px;color:var(--txt-3)">{{ "%02d"|format(h) }}:00</span>
+        {% endfor %}
+      </div>
+      <div class="timing-grid" id="timing-grid">
+        {% for h in range(24) %}
+        <div class="timing-cell" id="tc-{{ h }}" title="{{ "%02d"|format(h) }}:00 IST"></div>
+        {% endfor %}
+      </div>
+      <div style="display:flex;gap:12px;margin-top:10px;flex-wrap:wrap">
+        {% for col,lbl in [("#00e87a","NSE"),("#ffaa00","MCX"),("#4488ff","US Markets"),("#ff3366","Crypto"),("#00e87a","Current Hour")] %}
+        <div style="display:flex;align-items:center;gap:4px;font-size:9px;color:var(--txt-3)">
+          <div style="width:10px;height:10px;border-radius:2px;background:{{ col }}"></div>{{ lbl }}
+        </div>
+        {% endfor %}
+      </div>
+    </div>
+  </div>
+
+  <!-- Intraday patterns -->
+  <div class="gap">
+    <div class="card">
+      <div class="card-hd">Intraday Pattern Guide (NSE)</div>
+      <div style="display:flex;flex-direction:column;gap:10px">
+        {% for t,lbl,desc,tip in [
+          ("9:15–9:30","Opening Bell","High volatility, gap fill or gap extend","Wait 15 min before entering — let order book stabilize"),
+          ("9:30–10:30","Morning Trend","Direction usually set in first hour","Trade with the trend — avoid counter-trend entries"),
+          ("10:30–12:00","Mid-Morning","Trend continuation or reversal setup","Best window for trend-following trades"),
+          ("12:00–1:30","Lunch Lull","Low volume, choppy, range-bound","Avoid new entries — tight stops if holding"),
+          ("1:30–2:30","Afternoon Pickup","Institutional activity resumes","Watch for breakouts from lunch range"),
+          ("2:30–3:15","Power Hour","High volume, strong directional moves","Best R:R window — momentum trades"),
+          ("3:00–3:30","Closing Auction","F&O positions squared off — spikes","Dangerous near expiry — very wide stops"),
+        ] %}
+        <div style="padding:8px 10px;background:var(--bg-3);border-radius:5px">
+          <div style="display:flex;justify-content:space-between;align-items:center;margin-bottom:4px">
+            <span class="mono" style="font-size:10px;color:var(--gold)">{{ t }}</span>
+            <span style="font-size:11px;font-weight:600;color:var(--txt)">{{ lbl }}</span>
+          </div>
+          <div style="font-size:10px;color:var(--txt-2)">{{ desc }}</div>
+          <div style="font-size:9px;color:var(--txt-3);margin-top:3px">💡 {{ tip }}</div>
+        </div>
+        {% endfor %}
+      </div>
+    </div>
+
+    <div class="card">
+      <div class="card-hd">MCX Session Guide</div>
+      <div style="display:flex;flex-direction:column;gap:8px">
+        {% for t,lbl,desc in [
+          ("9:00 AM","MCX Opens","Gold, Silver, Copper, Zinc start"),
+          ("9:15 AM","NSE Overlap","Indian equity open — cross-asset signals"),
+          ("2:30 PM","London Opens","European metals trading begins"),
+          ("5:00 PM","Evening Session","CrudeOil, NatGas primary window"),
+          ("7:00 PM","NY Pre-Market","COMEX opens — Gold/Silver volatility"),
+          ("11:30 PM","MCX Closes","Final settlement, avoid last 5 minutes"),
+        ] %}
+        <div style="display:flex;gap:10px;font-size:11px;padding:4px 0;border-bottom:1px solid var(--border)">
+          <span class="mono" style="color:var(--gold);flex-shrink:0;width:70px">{{ t }}</span>
+          <div>
+            <span style="font-weight:600;color:var(--txt)">{{ lbl }}</span>
+            <span style="color:var(--txt-3)"> — {{ desc }}</span>
+          </div>
+        </div>
+        {% endfor %}
+      </div>
+    </div>
+  </div>
+</div>
+{% endblock %}
+
+{% block extra_js %}
+<script>
+const SESSION_HOURS = {
+  nse:   [9,10,11,12,13,14,15],
+  mcx:   [9,10,11,12,13,14,15,16,17,18,19,20,21,22,23],
+  us:    [19,20,21,22,23,0,1],
+  crypto: Array.from({length:24},(_,i)=>i),
+};
+
+const SESS_WINDOWS = [
+  { start:[8,45], end:[9,15] },   // Pre-market
+  { start:[9,15], end:[15,30] },  // NSE
+  { start:[9,0],  end:[17,0] },   // MCX morning
+  { start:[17,0], end:[23,30] },  // MCX evening
+  { start:[18,0], end:[21,30] },  // US pre-market
+  { start:[19,0], end:[25,30] },  // NYSE (wraps midnight)
+  { start:[0,0],  end:[24,0] },   // Crypto
+];
+
+function getIST() {
+  return new Date(new Date().toLocaleString("en-US",{timeZone:"Asia/Kolkata"}));
+}
+
+function inWindow(h, m, start, end) {
+  const cur = h*60+m, s = start[0]*60+start[1], e = end[0]*60+end[1];
+  return cur >= s && cur < e;
+}
+
+function updateSessions() {
+  const ist = getIST();
+  const h = ist.getHours(), m = ist.getMinutes();
+  const p = n => String(n).padStart(2,"0");
+  document.getElementById("ist-now").textContent = `${p(h)}:${p(m)}:${p(ist.getSeconds())} IST`;
+
+  SESS_WINDOWS.forEach((w,i) => {
+    const active = inWindow(h, m, w.start, w.end);
+    const badge  = document.getElementById(`sess-badge-${i+1}`);
+    const row    = document.getElementById(`sess-${i+1}`);
+    if (badge) { badge.textContent = active?"ACTIVE":"—"; badge.className = `sent-badge ${active?"sent-pos":"sent-neu"}`; }
+    if (row)   { row.style.borderLeft = active ? `2px solid var(--green)` : "2px solid transparent"; }
+  });
+
+  // Timing grid
+  for (let hour=0; hour<24; hour++) {
+    const cell = document.getElementById(`tc-${hour}`);
+    if (!cell) continue;
+    const isNSE    = SESSION_HOURS.nse.includes(hour) || hour===9;
+    const isMCX    = SESSION_HOURS.mcx.includes(hour);
+    const isUS     = SESSION_HOURS.us.includes(hour);
+    const isCrypto = true;
+    const isCurrent= hour === h;
+
+    if (isCurrent) { cell.style.background="var(--green)"; cell.style.boxShadow="0 0 6px var(--green)"; }
+    else if (isNSE && isMCX) { cell.style.background="rgba(0,232,122,.25)"; cell.style.boxShadow=""; }
+    else if (isNSE) { cell.style.background="var(--green-dim)"; cell.style.boxShadow=""; }
+    else if (isMCX) { cell.style.background="rgba(255,170,0,.15)"; cell.style.boxShadow=""; }
+    else if (isUS)  { cell.style.background="rgba(68,136,255,.15)"; cell.style.boxShadow=""; }
+    else { cell.style.background="var(--bg-4)"; cell.style.boxShadow=""; }
+  }
+
+  // Countdown
+  const nseOpen  = inWindow(h,m,[9,15],[15,30]);
+  const secs_to_close = {{ market.secs_to_close }};
+  const secs_to_open  = {{ market.secs_to_open }};
+  const countdown = nseOpen ? secs_to_close : secs_to_open;
+  if (countdown > 0) {
+    const hh = Math.floor(countdown/3600), mm = Math.floor((countdown%3600)/60), ss = countdown%60;
+    document.getElementById("countdown-val").textContent = `${p(hh)}:${p(mm)}:${p(ss)}`;
+    document.getElementById("countdown-lbl").textContent = nseOpen ? "NSE closes" : "NSE opens";
+  } else {
+    document.getElementById("countdown-val").textContent = "—";
+    document.getElementById("countdown-lbl").textContent = "—";
+  }
+}
+
+setInterval(updateSessions, 1000);
+updateSessions();
+</script>
+{% endblock %}

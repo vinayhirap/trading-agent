@@ -1,0 +1,35 @@
+
+# Secrets
+.env
+
+# Virtual env
+venv/
+.venv/
+
+# Python
+__pycache__/
+*.pyc
+*.pyo
+
+# Data
+data/raw/
+data/cache/
+data/processed/
+
+# Logs
+logs/
+
+# Testing
+.pytest_cache/
+
+# Build
+*.egg-info/
+dist/
+
+# OS
+.DS_Store
+Thumbs.db
+
+# IDE
+.vscode/
+.idea/

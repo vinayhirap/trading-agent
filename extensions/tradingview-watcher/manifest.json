@@ -1,0 +1,24 @@
+{
+  "manifest_version": 3,
+  "name": "TradingView Watcher Bridge",
+  "version": "0.1.0",
+  "description": "Reports the TradingView chart you are actively watching to the local trading agent.",
+  "permissions": [
+    "storage"
+  ],
+  "host_permissions": [
+    "https://*.tradingview.com/*",
+    "http://localhost:8502/*"
+  ],
+  "content_scripts": [
+    {
+      "matches": [
+        "https://*.tradingview.com/*"
+      ],
+      "js": [
+        "content.js"
+      ],
+      "run_at": "document_idle"
+    }
+  ]
+}

@@ -1,0 +1,40 @@
+{
+  "overall_accuracy": 40.9,
+  "n_folds": 20,
+  "n_predictions": 4249,
+  "regime_accuracy": {
+    "Regime.TRENDING_DOWN": {
+      "accuracy": 41.3,
+      "correct": 592,
+      "total": 1435
+    },
+    "Regime.TRENDING_UP": {
+      "accuracy": 40.6,
+      "correct": 601,
+      "total": 1480
+    },
+    "Regime.RANGING": {
+      "accuracy": 39.6,
+      "correct": 492,
+      "total": 1242
+    },
+    "Regime.VOLATILE": {
+      "accuracy": 57.6,
+      "correct": 53,
+      "total": 92
+    }
+  },
+  "fold_results": [],
+  "symbols_trained": [
+    "NIFTY50",
+    "BANKNIFTY",
+    "RELIANCE",
+    "TCS",
+    "HDFCBANK",
+    "INFY",
+    "GOLD",
+    "CRUDEOIL",
+    "BTC"
+  ],
+  "n_features": 46
+}

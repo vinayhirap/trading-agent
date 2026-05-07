@@ -1,0 +1,204 @@
+{% extends "base.html" %}
+{% block title %}Backtesting — AI Trading Agent{% endblock %}
+
+{% block extra_css %}
+.metric-row{display:flex;justify-content:space-between;padding:7px 0;border-bottom:1px solid var(--border);font-size:11px}
+.metric-row:last-child{border-bottom:none}
+{% endblock %}
+
+{% block content %}
+<div class="page-hd">
+  <div><div class="page-title">Walk-Forward Backtester</div>
+  <div class="page-sub">7-fold walk-forward · Triple Barrier labels · ATR stops · Confidence gate 55%</div></div>
+</div>
+
+<div class="g2" style="align-items:start">
+  <!-- Config form -->
+  <div class="card">
+    <div class="card-hd">Backtest Configuration</div>
+
+    <div class="fg">
+      <label class="lbl">Symbol</label>
+      <select class="sel" id="bt-sym" style="width:100%">
+        <optgroup label="Indices">{% for s in ["NIFTY50","BANKNIFTY","NIFTYIT","SENSEX"] %}<option>{{ s }}</option>{% endfor %}</optgroup>
+        <optgroup label="MCX">{% for s in ["GOLD","SILVER","CRUDEOIL","COPPER"] %}<option>{{ s }}</option>{% endfor %}</optgroup>
+        <optgroup label="Crypto">{% for s in ["BTC","ETH","SOL"] %}<option>{{ s }}</option>{% endfor %}</optgroup>
+        <optgroup label="Equities">{% for s in ["RELIANCE","TCS","HDFCBANK","INFY","ICICIBANK","SBIN","WIPRO","BAJFINANCE","MARUTI"] %}<option>{{ s }}</option>{% endfor %}</optgroup>
+      </select>
+    </div>
+
+    <div class="g2">
+      <div class="fg">
+        <label class="lbl">Start Date</label>
+        <input class="inp" id="bt-start" type="date" value="2024-01-01">
+      </div>
+      <div class="fg">
+        <label class="lbl">End Date</label>
+        <input class="inp" id="bt-end" type="date" value="2024-12-31">
+      </div>
+    </div>
+
+    <div class="g2">
+      <div class="fg">
+        <label class="lbl">Initial Capital (₹)</label>
+        <input class="inp" id="bt-capital" type="number" value="10000">
+      </div>
+      <div class="fg">
+        <label class="lbl">Risk Per Trade (%)</label>
+        <input class="inp" id="bt-risk" type="number" value="1" step="0.1" min="0.1" max="5">
+      </div>
+    </div>
+
+    <!-- System parameters (read-only) -->
+    <div style="background:var(--bg-3);border-radius:6px;padding:10px 12px;margin-bottom:14px">
+      <div class="kpi-lbl" style="margin-bottom:8px">Fixed System Parameters</div>
+      {% for k,v in [
+        ("Confidence Gate","55% minimum"),
+        ("Stop Loss","1.5× ATR (equity) / 2.0× ATR (crypto)"),
+        ("Target","2.0× ATR (equity) / 3.0× ATR (crypto)"),
+        ("Trailing Stop","Triggers at +1% profit, 0.5% steps"),
+        ("Walk-Forward Folds","7 folds"),
+        ("Label Method","Triple Barrier"),
+      ] %}
+      <div style="display:flex;justify-content:space-between;font-size:10px;padding:3px 0;border-bottom:1px solid var(--border)">
+        <span class="dim">{{ k }}</span><span class="mono" style="color:var(--txt)">{{ v }}</span>
+      </div>
+      {% endfor %}
+    </div>
+
+    <button class="btn btn-primary" style="width:100%;justify-content:center;padding:12px" onclick="runBacktest()" id="bt-btn">
+      ▶ Run Backtest
+    </button>
+    <div id="bt-progress" style="display:none;margin-top:10px">
+      <div style="display:flex;align-items:center;gap:8px;font-size:12px;color:var(--txt-2)">
+        <div class="spin"></div>
+        <span id="bt-progress-msg">Running backtest…</span>
+      </div>
+      <div style="height:3px;background:var(--bg-4);border-radius:2px;margin-top:8px">
+        <div id="bt-progress-bar" style="height:100%;background:var(--blue);border-radius:2px;width:0%;transition:width .3s"></div>
+      </div>
+    </div>
+  </div>
+
+  <!-- Results panel -->
+  <div class="gap">
+    <div class="card" id="results-card">
+      <div class="card-hd">Results</div>
+      <div id="bt-results" style="color:var(--txt-3);font-size:12px;text-align:center;padding:20px">
+        Configure and run a backtest to see results
+      </div>
+    </div>
+
+    <!-- Theory reference -->
+    <div class="card">
+      <div class="card-hd">Walk-Forward Theory</div>
+      <div style="display:flex;flex-direction:column;gap:8px;font-size:11px;color:var(--txt-2)">
+        <p><strong style="color:var(--txt)">Why walk-forward?</strong> Static train/test splits are misleading for time-series data — future data leaks into training. Walk-forward prevents this.</p>
+        <p><strong style="color:var(--txt)">7-fold structure:</strong> Each fold trains on previous N months, tests on next M months. Accuracy across folds gives honest out-of-sample performance.</p>
+        <p><strong style="color:var(--txt)">Triple Barrier labels:</strong> Instead of fixed lookahead, labels are determined by which barrier (SL/target/time) is hit first — giving realistic trade outcomes.</p>
+        <p><strong style="color:var(--txt)">EV framing:</strong> 52% accuracy at 1:1.5 R:R → EV = +0.025 per trade. Profitable even without high accuracy.</p>
+      </div>
+    </div>
+  </div>
+</div>
+{% endblock %}
+
+{% block extra_js %}
+<script>
+let progressInterval = null;
+
+async function runBacktest() {
+  const sym     = document.getElementById("bt-sym").value;
+  const start   = document.getElementById("bt-start").value;
+  const end     = document.getElementById("bt-end").value;
+  const capital = parseFloat(document.getElementById("bt-capital").value) || 10000;
+  const risk    = parseFloat(document.getElementById("bt-risk").value) / 100 || 0.01;
+  if (!start || !end) { toast("Set start and end dates","err"); return; }
+
+  const btn = document.getElementById("bt-btn");
+  btn.disabled = true; btn.textContent = "⏳ Running…";
+  document.getElementById("bt-progress").style.display = "block";
+  document.getElementById("bt-results").innerHTML =
+    `<div style="display:flex;align-items:center;justify-content:center;gap:8px;padding:30px;color:var(--txt-3)">
+      <div class="spin"></div> Running walk-forward backtest for ${sym}…
+    </div>`;
+
+  let pct = 0;
+  progressInterval = setInterval(() => {
+    pct = Math.min(pct + Math.random()*8, 90);
+    document.getElementById("bt-progress-bar").style.width = pct+"%";
+    const msgs = ["Loading price data…","Engineering features…","Training XGBoost folds…","Running walk-forward…","Computing metrics…"];
+    document.getElementById("bt-progress-msg").textContent = msgs[Math.floor(pct/20)]||"Running backtest…";
+  }, 400);
+
+  const data = await api("/api/backtest/run","POST",{symbol:sym, start, end, capital, risk});
+  clearInterval(progressInterval);
+  document.getElementById("bt-progress-bar").style.width = "100%";
+  btn.disabled = false; btn.textContent = "▶ Run Backtest";
+  setTimeout(() => document.getElementById("bt-progress").style.display = "none", 800);
+
+  if (!data.ok) {
+    document.getElementById("bt-results").innerHTML =
+      `<div style="color:var(--red);padding:16px;text-align:center">${data.error||"Backtest failed"}</div>`;
+    toast("Backtest failed: "+(data.error||"unknown"),"err"); return;
+  }
+
+  renderResults(data.result, sym, capital);
+  toast(`Backtest complete: ${sym}`,"ok");
+}
+
+function renderResults(r, sym, capital) {
+  if (!r) { document.getElementById("bt-results").innerHTML=`<div style="color:var(--txt-3)">No results returned</div>`; return; }
+  const pnl      = r.total_pnl || r.pnl || 0;
+  const ret      = r.total_return || (pnl/capital*100) || 0;
+  const winRate  = r.win_rate || 0;
+  const trades   = r.total_trades || r.trades || 0;
+  const maxDD    = r.max_drawdown || 0;
+  const sharpe   = r.sharpe_ratio || 0;
+  const acc      = r.accuracy || winRate;
+  const metrics  = [
+    ["Symbol", sym],
+    ["Total Trades", trades],
+    ["Win Rate", winRate.toFixed(1)+"%"],
+    ["Accuracy", acc ? acc.toFixed(1)+"%" : "—"],
+    ["Total P&L", (pnl>=0?"+":"")+`₹${Math.abs(pnl).toLocaleString("en-IN",{maximumFractionDigits:0})}`],
+    ["Return", (ret>=0?"+":"")+ret.toFixed(2)+"%"],
+    ["Max Drawdown", maxDD.toFixed(2)+"%"],
+    ["Sharpe Ratio", sharpe.toFixed(2)],
+    ["Profit Factor", r.profit_factor ? r.profit_factor.toFixed(2) : "—"],
+    ["Avg Win", r.avg_win ? `₹${r.avg_win.toFixed(0)}` : "—"],
+    ["Avg Loss", r.avg_loss ? `₹${r.avg_loss.toFixed(0)}` : "—"],
+    ["Total Charges", r.total_charges ? `₹${r.total_charges.toFixed(0)}` : "—"],
+  ];
+  document.getElementById("bt-results").innerHTML = `
+    <div class="kpi-row" style="grid-template-columns:repeat(3,1fr);margin-bottom:14px">
+      <div class="kpi">
+        <div class="kpi-lbl">Return</div>
+        <div class="kpi-val ${ret>=0?"up":"dn"}">${ret>=0?"+":""}${ret.toFixed(2)}%</div>
+      </div>
+      <div class="kpi">
+        <div class="kpi-lbl">Win Rate</div>
+        <div class="kpi-val ${winRate>=55?"up":winRate>=40?"":"dn"}">${winRate.toFixed(1)}%</div>
+      </div>
+      <div class="kpi">
+        <div class="kpi-lbl">Trades</div>
+        <div class="kpi-val">${trades}</div>
+      </div>
+    </div>
+    ${metrics.map(([k,v]) => `<div class="metric-row"><span class="dim">${k}</span><span class="mono">${v}</span></div>`).join("")}
+    <div style="margin-top:12px;padding:8px 10px;border-radius:6px;
+      background:${pnl>=0?"var(--green-dim)":"var(--red-dim)"};
+      border:1px solid ${pnl>=0?"rgba(0,232,122,.3)":"rgba(255,51,102,.3)"};
+      font-size:11px;color:${pnl>=0?"var(--green)":"var(--red)"};text-align:center;font-weight:700">
+      ${pnl>=0?"✅ PROFITABLE":"❌ UNPROFITABLE"} — ${ret>=0?"+":""}${ret.toFixed(2)}% return on ₹${capital.toLocaleString("en-IN")}
+    </div>
+  `;
+}
+
+// Set default dates
+const today = new Date();
+const oneYearAgo = new Date(today); oneYearAgo.setFullYear(oneYearAgo.getFullYear()-1);
+document.getElementById("bt-end").value   = today.toISOString().split("T")[0];
+document.getElementById("bt-start").value = oneYearAgo.toISOString().split("T")[0];
+</script>
+{% endblock %}

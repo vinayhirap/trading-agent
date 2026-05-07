@@ -1,0 +1,360 @@
+{% extends "base.html" %}
+{% block title %}Dashboard — AI Trading Agent{% endblock %}
+
+{% block content %}
+<div class="page-hd">
+  <div>
+    <div class="page-title">Market Overview</div>
+    <div class="page-sub">Live prices · AI signals · Portfolio · <span class="live"></span> Real-time</div>
+  </div>
+  <div class="page-actions">
+    <span class="dim mono" id="refresh-time" style="font-size:11px">—</span>
+    <button class="btn btn-ghost btn-sm" onclick="refreshAll()">↻ Refresh</button>
+  </div>
+</div>
+
+<!-- KPI row — auto-ticking via WebSocket -->
+<div class="kpi-row" id="kpi-row">
+  {% for sym in ["NIFTY50","BANKNIFTY","NIFTYIT","GOLD","CRUDEOIL","BTC","ETH"] %}
+  <div class="kpi" id="kpi-{{ sym }}">
+    <div class="kpi-lbl">{{ sym }}</div>
+    <div class="kpi-val" id="kpi-v-{{ sym }}">—</div>
+    <div class="kpi-sub" id="kpi-s-{{ sym }}">Loading…</div>
+  </div>
+  {% endfor %}
+</div>
+
+<!-- Main 2-col grid -->
+<div class="g2" style="margin-bottom:14px">
+
+  <!-- Signal cards -->
+  <div class="card">
+    <div class="card-hd">
+      Live Signals
+      <a href="/scanner" class="btn btn-ghost btn-sm">Full Scanner →</a>
+    </div>
+    <div style="display:grid;grid-template-columns:1fr 1fr;gap:8px" id="sig-grid">
+      {% for sym in ["NIFTY50","BANKNIFTY","GOLD","CRUDEOIL","BTC","ETH","NIFTYIT","SILVER"] %}
+      <div class="sig-card" id="sc-{{ sym }}">
+        <div style="display:flex;justify-content:space-between;align-items:flex-start">
+          <div>
+            <div class="sig-sym">{{ sym }}</div>
+            <div class="sig-px" id="scpx-{{ sym }}">—</div>
+          </div>
+          <div id="scrgm-{{ sym }}"></div>
+        </div>
+        <div class="sig-badge b-hold" id="scbdg-{{ sym }}">—</div>
+        <div class="conf-track"><div class="conf-fill hold" id="sccnf-{{ sym }}" style="width:0"></div></div>
+        <div class="sig-tags">
+          <span class="tag" id="scrsi-{{ sym }}">RSI —</span>
+          <span class="tag" id="scadx-{{ sym }}">ADX —</span>
+          <span class="tag" id="scsess-{{ sym }}">—</span>
+        </div>
+      </div>
+      {% endfor %}
+    </div>
+  </div>
+
+  <!-- Right panel -->
+  <div class="gap">
+    <!-- Portfolio -->
+    <div class="card">
+      <div class="card-hd">Paper Portfolio <a href="/portfolio" class="btn btn-ghost btn-sm">View →</a></div>
+      <div class="g2">
+        <div><div class="kpi-lbl">Portfolio Value</div><div class="kpi-val" id="pf-val" style="font-size:17px">—</div></div>
+        <div><div class="kpi-lbl">Total P&L</div><div class="kpi-val" id="pf-pnl" style="font-size:17px">—</div></div>
+        <div><div class="kpi-lbl">Cash</div><div class="kpi-val" id="pf-cash" style="font-size:14px">—</div></div>
+        <div><div class="kpi-lbl">Open Positions</div><div class="kpi-val" id="pf-pos" style="font-size:14px">—</div></div>
+      </div>
+    </div>
+
+    <!-- Market status -->
+    <div class="card">
+      <div class="card-hd">Market Status</div>
+      <div style="display:flex;flex-direction:column;gap:10px">
+        {% for label, is_open in [("NSE / BSE", market.nse_open),("MCX Commodities", market.mcx_open)] %}
+        <div style="display:flex;justify-content:space-between;align-items:center">
+          <span class="dim" style="font-size:12px">{{ label }}</span>
+          {% if is_open %}
+          <span class="mkt-badge open" style="font-size:9px;padding:3px 9px"><span class="pulse-dot"></span>OPEN</span>
+          {% else %}
+          <span class="mkt-badge closed" style="font-size:9px;padding:3px 9px"><span class="pulse-dot"></span>CLOSED</span>
+          {% endif %}
+        </div>
+        {% endfor %}
+        <div style="display:flex;justify-content:space-between;align-items:center">
+          <span class="dim" style="font-size:12px">Crypto 24×7</span>
+          <span class="mkt-badge open" style="font-size:9px;padding:3px 9px"><span class="pulse-dot"></span>OPEN</span>
+        </div>
+        <div class="divider"></div>
+        <div style="display:flex;justify-content:space-between">
+          <span class="dim" style="font-size:11px">USDINR</span>
+          <span class="mono up" id="usdinr-card" style="font-size:12px">₹{{ "%.4f"|format(usdinr) }}</span>
+        </div>
+        {% if market.is_holiday %}
+        <div style="background:var(--gold-dim);border:1px solid rgba(255,170,0,.3);border-radius:5px;padding:8px 10px;font-size:11px;color:var(--gold)">
+          🏖️ Holiday: {{ market.holiday_name }}
+        </div>
+        {% endif %}
+      </div>
+    </div>
+  </div>
+</div>
+
+<!-- Signals table -->
+<div class="card">
+  <div class="card-hd">
+    All Markets — Signal Table
+    <div style="display:flex;gap:6px">
+      <span id="sig-count" class="dim" style="font-size:10px;align-self:center"></span>
+      <button class="btn btn-ghost btn-sm" onclick="loadSignals()">↻</button>
+    </div>
+  </div>
+  <div class="tbl-wrap">
+    <table>
+      <thead>
+        <tr>
+          <th>Symbol</th><th>Price</th><th>Action</th>
+          <th>Confidence</th><th>Regime</th>
+          <th>Session</th><th>Timing</th><th>RSI</th>
+        </tr>
+      </thead>
+      <tbody id="sig-tbody">
+        <tr><td colspan="8" style="text-align:center;padding:24px;color:var(--txt-3)">
+          <div style="display:flex;align-items:center;justify-content:center;gap:8px">
+            <div class="spin"></div> Loading signals…
+          </div>
+        </td></tr>
+      </tbody>
+    </table>
+  </div>
+</div>
+{% endblock %}
+
+{% block extra_js %}
+<script>
+const WATCHLIST = ["NIFTY50","BANKNIFTY","NIFTYIT","GOLD","SILVER","CRUDEOIL","BTC","ETH"];
+const REGIME_CLS = { TRENDING_UP:"r-up", TRENDING_DOWN:"r-dn", RANGING:"r-rg", VOLATILE:"r-vl" };
+const REGIME_LBL = { TRENDING_UP:"📈 Trending ↑", TRENDING_DOWN:"📉 Trending ↓", RANGING:"↔ Ranging", VOLATILE:"⚡ Volatile" };
+
+// ── Live price state ──────────────────────────────────────────────────────────
+let kpiPrev      = {};   // sym → last displayed value (for color flash)
+let latestPrices = {};   // sym → info object from server
+let latestUsdinr = 92.46;
+// KEY FIX: track when WE received the price, not when server produced it.
+// Server `age` grows with yfinance polling interval (~3s). We ignore it for
+// freshness display — only use local receive time.
+let lastReceivedAt = {};  // sym → Date.now() when WS message arrived
+
+// ── WebSocket price handler ───────────────────────────────────────────────────
+window.addEventListener("prices", (e) => {
+  const { prices, usdinr } = e.detail;
+  const now = Date.now();
+  latestPrices = prices;
+  latestUsdinr = usdinr || 92.46;
+
+  for (const sym of WATCHLIST) {
+    const info = prices[sym];
+    if (!info) continue;
+
+    // Record when WE received this price — this is our freshness clock
+    lastReceivedAt[sym] = now;
+
+    // ── KPI value update with color flash ────────────────────────────────
+    const vEl = document.getElementById("kpi-v-" + sym);
+    if (!vEl) continue;
+
+    const str  = fmtDisplay(sym, info.display, info.label);
+    const prev = kpiPrev[sym];
+
+    if (vEl.textContent !== str || prev === undefined) {
+      const dir = (prev !== undefined)
+        ? (info.display > prev ? "up" : info.display < prev ? "dn" : "")
+        : "";
+      vEl.textContent = str;
+      if (dir) {
+        vEl.className = "kpi-val " + dir;
+        setTimeout(() => { vEl.className = "kpi-val"; }, 600);
+      }
+    }
+    kpiPrev[sym] = info.display;
+
+    // ── Signal card price ─────────────────────────────────────────────────
+    const pxEl = document.getElementById("scpx-" + sym);
+    if (pxEl) pxEl.textContent = str;
+  }
+
+// USDINR
+  const uEl = document.getElementById("usdinr-card");
+  if (uEl && usdinr) uEl.textContent = "₹" + usdinr.toFixed(4);
+
+  // Table price cells
+  for (const [sym, info] of Object.entries(prices)) {
+    const str     = fmtDisplay(sym, info.display, info.label);
+    const safeSym = sym.replace(/[^a-zA-Z0-9_-]/g, '_');
+    const cells   = document.querySelectorAll(`.ws-price-${safeSym}`);
+    cells.forEach(c => { if (c.textContent !== str) c.textContent = str; });
+  }
+});
+
+// ── Independent 500ms ticker — updates "Xs ago" using LOCAL receive time ──────
+// KEY FIX: use (Date.now() - lastReceivedAt[sym]) as age.
+// This resets to 0 every time WS pushes. Server `age` field is IGNORED for
+// freshness — it reflects yfinance data age (3-5s), not WS push latency.
+// STALE threshold = 15s (no WS message received for 15s = truly stale)
+setInterval(() => {
+  const now = Date.now();
+  for (const sym of WATCHLIST) {
+    const sEl = document.getElementById("kpi-s-" + sym);
+    if (!sEl) continue;
+
+    if (!latestPrices[sym]) {
+      sEl.textContent = "Loading…";
+      sEl.style.color = "";
+      continue;
+    }
+
+    const receivedAt = lastReceivedAt[sym];
+    if (!receivedAt) {
+      sEl.textContent = "Waiting…";
+      sEl.style.color = "";
+      continue;
+    }
+
+    // Age = seconds since we last got a WS push for this symbol
+    const ageSec = (now - receivedAt) / 1000;
+
+    if (ageSec < 1.5) {
+      sEl.textContent = "● live";
+      sEl.style.color = "var(--green)";
+    } else if (ageSec < 15) {
+      sEl.textContent = ageSec.toFixed(1) + "s ago";
+      sEl.style.color = ageSec < 5 ? "" : "var(--gold)";
+    } else if (ageSec < 120) {
+      sEl.textContent = Math.round(ageSec) + "s ago";
+      sEl.style.color = "var(--gold)";
+    } else {
+      sEl.textContent = "stale";
+      sEl.style.color = "var(--red)";
+    }
+  }
+}, 500);
+
+
+// ── Load signals ──────────────────────────────────────────────────────────────
+async function loadSignals() {
+  const syms = WATCHLIST.concat(["RELIANCE","TCS","SBIN","INFY"]).join(",");
+  const data = await api(`/api/signals?symbols=${syms}`);
+  if (!data.ok) return;
+  const sigs = data.signals;
+
+  for (const sym of WATCHLIST) {
+    const s = sigs[sym]; if (!s) continue;
+    const rec    = (s.recommended_instrument || s.action || "HOLD").toUpperCase();
+    const conf   = Math.round((s.confidence || 0.5) * 100);
+    const isBuy  = rec.includes("BUY") || rec.includes("CALL");
+    const isSell = rec.includes("SELL") || rec.includes("PUT");
+    const cls    = isBuy ? "buy" : isSell ? "sell" : "hold";
+
+    const card = document.getElementById("sc-" + sym);
+    if (card) card.className = "sig-card " + cls;
+
+    const bdg = document.getElementById("scbdg-" + sym);
+    if (bdg) { bdg.textContent = rec; bdg.className = `sig-badge ${isBuy?"b-buy":isSell?"b-sell":"b-hold"}`; }
+
+    const cnf = document.getElementById("sccnf-" + sym);
+    if (cnf) { cnf.style.width = `${conf}%`; cnf.className = `conf-fill ${cls}`; }
+
+    const rgm = document.getElementById("scrgm-" + sym);
+    if (rgm && s.regime) {
+      const rc = REGIME_CLS[s.regime] || "r-rg";
+      rgm.innerHTML = `<span class="regime ${rc}">${REGIME_LBL[s.regime] || s.regime}</span>`;
+    }
+
+    // Only set price from signal if WS hasn't already set it
+    const wsInfo = latestPrices[sym];
+    const pxEl   = document.getElementById("scpx-" + sym);
+    if (pxEl && !wsInfo) {
+      pxEl.textContent = s.price ? fmtDisplay(sym, s.price, "") : "—";
+    }
+
+    const setEl = (id, txt) => { const el = document.getElementById(id + "-" + sym); if (el) el.textContent = txt; };
+    setEl("scrsi",  s.rsi ? `RSI ${parseFloat(s.rsi).toFixed(1)}` : "RSI —");
+    setEl("scadx",  s.adx ? `ADX ${parseFloat(s.adx).toFixed(1)}` : "ADX —");
+    setEl("scsess", s.session_label || "—");
+  }
+
+  // Signal table
+  const allSyms = Object.keys(sigs);
+  document.getElementById("sig-count").textContent = `${allSyms.length} symbols`;
+  document.getElementById("sig-tbody").innerHTML = allSyms.map(sym => {
+    const s = sigs[sym]; if (!s) return "";
+    const rec    = (s.recommended_instrument || s.action || "—").toUpperCase();
+    const conf   = Math.round((s.confidence || 0.5) * 100);
+    const isBuy  = rec.includes("BUY") || rec.includes("CALL");
+    const isSell = rec.includes("SELL") || rec.includes("PUT");
+    const aCls   = isBuy ? "up" : isSell ? "dn" : "";
+    const regime = s.regime || "";
+    const rCls   = REGIME_CLS[regime] || "r-rg";
+    const rLbl   = REGIME_LBL[regime] || regime.replace(/_/g, " ");
+
+    const wsInfo = latestPrices[sym];
+    const price  = wsInfo
+      ? fmtDisplay(sym, wsInfo.display, wsInfo.label)
+      : s.price ? fmtDisplay(sym, s.price, "") : "—";
+
+    return `<tr>
+      <td class="ui">${sym}</td>
+      <td class="ws-price-${sym.replace(/[^a-zA-Z0-9_-]/g,'_')}">${price}</td>
+      <td class="${aCls}" style="font-weight:700">${rec}</td>
+      <td><div style="display:flex;align-items:center;gap:6px">
+        <div style="width:44px;height:2px;background:var(--bg-4);border-radius:2px">
+          <div style="width:${conf}%;height:100%;background:${isBuy?"var(--green)":isSell?"var(--red)":"var(--txt-3)"};border-radius:2px"></div>
+        </div>
+        <span class="dim">${conf}%</span>
+      </div></td>
+      <td><span class="regime ${rCls}">${rLbl}</span></td>
+      <td class="dim" style="font-family:var(--font);font-size:11px">${s.session_label || "—"}</td>
+      <td class="dim" style="font-family:var(--font);font-size:11px">${s.entry_timing || "—"}</td>
+      <td>${s.rsi ? parseFloat(s.rsi).toFixed(1) : "—"}</td>
+    </tr>`;
+  }).join("");
+
+  document.getElementById("refresh-time").textContent = "Updated " + new Date().toLocaleTimeString();
+}
+
+// ── Portfolio ─────────────────────────────────────────────────────────────────
+async function loadPortfolio() {
+  const data = await api("/api/portfolio");
+  if (!data.ok || !data.portfolio) return;
+  const p   = data.portfolio;
+  const pnl = p.total_pnl || 0;
+  const fmt = v => v >= 100000
+    ? `₹${(v / 100000).toFixed(2)}L`
+    : `₹${(v || 0).toLocaleString("en-IN", {maximumFractionDigits: 0})}`;
+  const set = (id, v) => { const e = document.getElementById(id); if (e) e.textContent = v; };
+  set("pf-val",  fmt(p.total_value || 10000));
+  set("pf-cash", fmt(p.cash || 0));
+  set("pf-pos",  (p.n_positions || 0) + " open");
+  const pEl = document.getElementById("pf-pnl");
+  if (pEl) {
+    pEl.textContent = (pnl >= 0 ? "+" : "") + fmt(Math.abs(pnl));
+    pEl.className   = "kpi-val " + (pnl >= 0 ? "up" : "dn");
+  }
+}
+
+// ── Refresh all + reconnect WS if needed ─────────────────────────────────────
+function refreshAll() {
+  loadSignals();
+  loadPortfolio();
+  // Reconnect WS if it dropped
+  if (typeof ws !== "undefined" && ws && ws.readyState !== WebSocket.OPEN) {
+    if (typeof connectWS === "function") connectWS();
+  }
+}
+
+refreshAll();
+setInterval(loadSignals,   30000);
+setInterval(loadPortfolio, 60000);
+</script>
+{% endblock %}

@@ -1,0 +1,243 @@
+{% extends "base.html" %}
+{% block title %}Portfolio — AI Trading Agent{% endblock %}
+
+{% block extra_css %}
+.pos-card{background:var(--bg-3);border:1px solid var(--border);border-radius:6px;padding:12px 14px;transition:border-color .2s}
+.pos-card:hover{border-color:var(--border-2)}
+.pos-card.long{border-left:2px solid var(--green)}
+.pos-card.short{border-left:2px solid var(--red)}
+.pnl-bar{height:4px;border-radius:2px;overflow:hidden;background:var(--bg-4);margin-top:6px}
+{% endblock %}
+
+{% block content %}
+<div class="page-hd">
+  <div><div class="page-title">Paper Portfolio</div>
+  <div class="page-sub">Simulated trading P&L · Position tracking · Starting capital ₹10,000</div></div>
+  <div class="page-actions">
+    <button class="btn btn-ghost btn-sm" onclick="loadPortfolio()">↻ Refresh</button>
+    <span class="dim mono" id="pf-time" style="font-size:11px">—</span>
+  </div>
+</div>
+
+<!-- Portfolio KPIs -->
+<div class="kpi-row" style="grid-template-columns:repeat(6,1fr);margin-bottom:18px">
+  <div class="kpi"><div class="kpi-lbl">Portfolio Value</div><div class="kpi-val" id="k-value">—</div></div>
+  <div class="kpi"><div class="kpi-lbl">Total P&L</div><div class="kpi-val" id="k-pnl">—</div></div>
+  <div class="kpi"><div class="kpi-lbl">P&L %</div><div class="kpi-val" id="k-pnl-pct">—</div></div>
+  <div class="kpi"><div class="kpi-lbl">Cash Available</div><div class="kpi-val" id="k-cash">—</div></div>
+  <div class="kpi"><div class="kpi-lbl">Open Positions</div><div class="kpi-val" id="k-pos">—</div></div>
+  <div class="kpi"><div class="kpi-lbl">Total Trades</div><div class="kpi-val" id="k-trades">—</div></div>
+</div>
+
+<div class="g2">
+  <!-- Open positions -->
+  <div>
+    <div class="card-hd" style="margin-bottom:10px">
+      Open Positions
+      <a href="/trade" class="btn btn-ghost btn-sm">+ New Trade →</a>
+    </div>
+    <div id="positions-list" style="display:flex;flex-direction:column;gap:8px">
+      <div class="card" style="color:var(--txt-3);text-align:center;padding:24px">No open positions</div>
+    </div>
+  </div>
+
+  <!-- Right panel -->
+  <div class="gap">
+    <!-- Trade history -->
+    <div class="card">
+      <div class="card-hd">Recent Trades</div>
+      <div id="trade-history">
+        <div style="color:var(--txt-3);font-size:11px;text-align:center;padding:16px">No trade history</div>
+      </div>
+    </div>
+
+    <!-- Performance metrics -->
+    <div class="card">
+      <div class="card-hd">Performance Metrics</div>
+      <div id="perf-metrics" style="display:flex;flex-direction:column;gap:6px">
+        <div style="color:var(--txt-3);font-size:11px">Loading…</div>
+      </div>
+    </div>
+
+    <!-- Capital allocation -->
+    <div class="card">
+      <div class="card-hd">Capital Allocation</div>
+      <div id="allocation" style="display:flex;flex-direction:column;gap:6px">
+        <div style="color:var(--txt-3);font-size:11px">Loading…</div>
+      </div>
+    </div>
+  </div>
+</div>
+
+<!-- Closed trades table -->
+<div class="card" style="margin-top:14px">
+  <div class="card-hd">Closed Trades History</div>
+  <div class="tbl-wrap">
+    <table>
+      <thead><tr><th>Symbol</th><th>Side</th><th>Entry</th><th>Exit</th><th>Qty</th><th>P&L</th><th>P&L%</th><th>Charges</th><th>Date</th></tr></thead>
+      <tbody id="closed-tbody">
+        <tr><td colspan="9" style="text-align:center;padding:20px;color:var(--txt-3)">No closed trades</td></tr>
+      </tbody>
+    </table>
+  </div>
+</div>
+{% endblock %}
+
+{% block extra_js %}
+<script>
+let currentPrices = {};
+window.addEventListener("prices", e => { currentPrices = e.detail.prices; refreshPositionPnl(); });
+
+function fmt(v) {
+  if (v === undefined || v === null) return "—";
+  const abs = Math.abs(v);
+  if (abs >= 100000) return `₹${(v/100000).toFixed(2)}L`;
+  return `₹${v.toLocaleString("en-IN",{maximumFractionDigits:0})}`;
+}
+function fmtPct(v) { return v !== null && v !== undefined ? (v>=0?"+":"")+v.toFixed(2)+"%" : "—"; }
+
+async function loadPortfolio() {
+  const data = await api("/api/portfolio");
+  document.getElementById("pf-time").textContent = "Updated " + new Date().toLocaleTimeString();
+  if (!data.ok || !data.portfolio) {
+    toast("Failed to load portfolio","err"); return;
+  }
+  const p = data.portfolio;
+  const pnl     = p.total_pnl || 0;
+  const pnlPct  = p.total_pnl_pct || (pnl / 10000 * 100);
+  document.getElementById("k-value").textContent   = fmt(p.total_value);
+  document.getElementById("k-cash").textContent    = fmt(p.cash);
+  document.getElementById("k-pos").textContent     = p.n_positions || 0;
+  document.getElementById("k-trades").textContent  = p.total_trades || 0;
+  const pnlEl = document.getElementById("k-pnl");
+  pnlEl.textContent  = (pnl>=0?"+":"")+fmt(Math.abs(pnl));
+  pnlEl.className    = "kpi-val " + (pnl>=0?"up":"dn");
+  const pctEl = document.getElementById("k-pnl-pct");
+  pctEl.textContent = fmtPct(pnlPct);
+  pctEl.className   = "kpi-val " + (pnlPct>=0?"up":"dn");
+
+  renderPositions(p.positions || []);
+  renderTradeHistory(p.recent_trades || []);
+  renderClosedTrades(p.closed_trades || []);
+  renderPerformance(p);
+  renderAllocation(p);
+}
+
+function renderPositions(positions) {
+  const el = document.getElementById("positions-list");
+  if (!positions.length) {
+    el.innerHTML = `<div class="card" style="color:var(--txt-3);text-align:center;padding:24px">No open positions</div>`; return;
+  }
+  el.innerHTML = positions.map(pos => {
+    const liveInfo  = currentPrices[pos.symbol];
+    const livePrice = liveInfo ? liveInfo.display : pos.current_price || pos.entry_price;
+    const pnl       = (livePrice - pos.entry_price) * pos.quantity * (pos.side==="SELL"?-1:1);
+    const pnlPct    = ((livePrice - pos.entry_price) / pos.entry_price * 100);
+    const isLong    = pos.side==="BUY";
+    const pnlCls    = pnl>=0?"up":"dn";
+    return `<div class="pos-card ${isLong?"long":"short"}">
+      <div style="display:flex;justify-content:space-between;align-items:flex-start">
+        <div>
+          <div style="font-size:14px;font-weight:700;color:var(--txt)">${pos.symbol}</div>
+          <div style="font-size:10px;color:var(--txt-3)">Entry: ₹${pos.entry_price?.toLocaleString("en-IN",{maximumFractionDigits:2})} · Qty: ${pos.quantity}</div>
+        </div>
+        <div style="text-align:right">
+          <div class="${pnlCls}" style="font-size:14px;font-weight:700;font-family:var(--mono-font)">${pnl>=0?"+":""}${fmt(Math.abs(pnl))}</div>
+          <div class="${pnlCls}" style="font-size:10px">${fmtPct(pnlPct)}</div>
+        </div>
+      </div>
+      <div class="pnl-bar"><div style="width:${Math.min(Math.abs(pnlPct)*10,100)}%;height:100%;background:${pnl>=0?"var(--green)":"var(--red)"};border-radius:2px"></div></div>
+      <div style="display:flex;justify-content:space-between;margin-top:8px;font-size:10px;color:var(--txt-3)">
+        <span>Live: ₹${livePrice?.toLocaleString("en-IN",{maximumFractionDigits:2})}</span>
+        ${pos.stop_loss  ? `<span class="dn">SL: ₹${pos.stop_loss?.toLocaleString("en-IN",{maximumFractionDigits:0})}</span>` : ""}
+        ${pos.target_price ? `<span class="up">TGT: ₹${pos.target_price?.toLocaleString("en-IN",{maximumFractionDigits:0})}</span>` : ""}
+        <span class="${isLong?"up":"dn"}">${pos.side}</span>
+      </div>
+    </div>`;
+  }).join("");
+}
+
+function refreshPositionPnl() {
+  document.querySelectorAll(".pos-card").forEach(card => {
+    // Live P&L updates handled on next loadPortfolio call
+  });
+}
+
+function renderTradeHistory(trades) {
+  document.getElementById("trade-history").innerHTML = trades.slice(0,8).map(t => `
+    <div style="display:flex;justify-content:space-between;font-size:11px;padding:5px 0;border-bottom:1px solid var(--border)">
+      <span class="mono" style="font-weight:600">${t.symbol}</span>
+      <span class="${t.side==="BUY"?"up":"dn"}">${t.side}</span>
+      <span class="dim">₹${t.fill_price?.toLocaleString("en-IN",{maximumFractionDigits:0})} × ${t.quantity}</span>
+      <span class="dim">${t.timestamp ? new Date(t.timestamp).toLocaleDateString() : "—"}</span>
+    </div>`).join("") || `<div style="color:var(--txt-3);font-size:11px;text-align:center;padding:12px">No trades yet</div>`;
+}
+
+function renderClosedTrades(trades) {
+  const tbody = document.getElementById("closed-tbody");
+  if (!trades.length) {
+    tbody.innerHTML = `<tr><td colspan="9" style="text-align:center;padding:20px;color:var(--txt-3)">No closed trades</td></tr>`; return;
+  }
+  tbody.innerHTML = trades.map(t => {
+    const pnl = t.pnl || 0;
+    const pct = t.pnl_pct || 0;
+    return `<tr>
+      <td class="ui">${t.symbol}</td>
+      <td class="${t.side==="BUY"?"up":"dn"}">${t.side}</td>
+      <td>₹${t.entry_price?.toLocaleString("en-IN",{maximumFractionDigits:2})}</td>
+      <td>₹${t.exit_price?.toLocaleString("en-IN",{maximumFractionDigits:2})}</td>
+      <td>${t.quantity}</td>
+      <td class="${pnl>=0?"up":"dn"}">${pnl>=0?"+":""}${fmt(Math.abs(pnl))}</td>
+      <td class="${pct>=0?"up":"dn"}">${fmtPct(pct)}</td>
+      <td class="dn">₹${(t.charges||0).toFixed(2)}</td>
+      <td class="dim">${t.date||"—"}</td>
+    </tr>`;
+  }).join("");
+}
+
+function renderPerformance(p) {
+  const metrics = [
+    ["Win Rate",   p.win_rate   ? p.win_rate.toFixed(1)+"%" : "—"],
+    ["Avg Win",    p.avg_win    ? "+"+fmt(p.avg_win) : "—"],
+    ["Avg Loss",   p.avg_loss   ? fmt(p.avg_loss) : "—"],
+    ["Best Trade", p.best_trade ? "+"+fmt(p.best_trade) : "—"],
+    ["Worst Trade",p.worst_trade? fmt(p.worst_trade) : "—"],
+    ["Total Charges",fmt(p.total_charges||0)],
+  ];
+  document.getElementById("perf-metrics").innerHTML = metrics.map(([k,v]) =>
+    `<div style="display:flex;justify-content:space-between;font-size:11px;padding:4px 0;border-bottom:1px solid var(--border)">
+      <span class="dim">${k}</span><span class="mono">${v}</span>
+    </div>`).join("");
+}
+
+function renderAllocation(p) {
+  const cash = p.cash || 0;
+  const invested = (p.total_value||10000) - cash;
+  const total = p.total_value || 10000;
+  document.getElementById("allocation").innerHTML = `
+    <div style="margin-bottom:6px">
+      <div style="display:flex;justify-content:space-between;font-size:11px;margin-bottom:4px">
+        <span class="dim">Invested</span><span class="mono">${fmt(invested)} (${(invested/total*100).toFixed(1)}%)</span>
+      </div>
+      <div style="height:6px;background:var(--bg-4);border-radius:3px">
+        <div style="width:${Math.min(invested/total*100,100)}%;height:100%;background:var(--blue);border-radius:3px"></div>
+      </div>
+    </div>
+    <div>
+      <div style="display:flex;justify-content:space-between;font-size:11px;margin-bottom:4px">
+        <span class="dim">Cash</span><span class="mono">${fmt(cash)} (${(cash/total*100).toFixed(1)}%)</span>
+      </div>
+      <div style="height:6px;background:var(--bg-4);border-radius:3px">
+        <div style="width:${Math.min(cash/total*100,100)}%;height:100%;background:var(--green);border-radius:3px"></div>
+      </div>
+    </div>
+    <div style="font-size:10px;color:var(--txt-3);margin-top:8px">
+      Initial capital: ₹10,000 · Daily loss limit: 2%
+    </div>
+  `;
+}
+
+loadPortfolio();
+setInterval(loadPortfolio, 30000);
+</script>
+{% endblock %}

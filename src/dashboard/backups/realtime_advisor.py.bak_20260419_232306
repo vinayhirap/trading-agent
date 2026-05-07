@@ -1,0 +1,641 @@
+"""
+Realtime advisor service.
+
+Builds 1-minute rolling candles from cached intraday history plus local ticks,
+computes live indicators, applies session-aware intraday logic, and upgrades
+index signals into CALL/PUT ideas through the F&O engine when possible.
+
+This stays backend-driven and deterministic. TradingView remains a display
+surface; the signal engine reads our own market data.
+"""
+from __future__ import annotations
+
+import threading
+import time
+from dataclasses import asdict, dataclass, field
+from datetime import datetime, timezone
+
+import pandas as pd
+from loguru import logger
+
+from config.settings import settings
+from src.alerts.telegram_sender import make_telegram_sender_from_settings
+from src.analysis.intraday_engine import intraday_engine
+from src.data.manager import DataManager
+from src.data.models import Interval
+from src.features.feature_engine import FeatureEngine
+from src.fotrading.fo_engine import fo_engine
+from src.fotrading.option_chain import option_chain_fetcher
+from src.streaming.price_store import price_store
+
+
+WATCHLIST = [
+    "NIFTY50",
+    "BANKNIFTY",
+    "NIFTYIT",
+    "GOLD",
+    "SILVER",
+    "CRUDEOIL",
+    "BTC",
+    "ETH",
+]
+
+OPTIONABLE = {"NIFTY50", "BANKNIFTY"}
+CRYPTO_24X7 = {"BTC", "ETH", "SOL", "MATIC", "BNB", "XRP", "ADA", "DOGE", "AVAX", "DOT"}
+
+
+@dataclass
+class RealtimeAdvice:
+    symbol: str
+    action: str
+    confidence: float
+    recommended_instrument: str
+    price: float
+    source: str
+    updated_at: str
+    reason_summary: str
+    session_label: str = ""
+    entry_timing: str = ""
+    regime: str = ""
+    instrument_symbol: str = ""
+    rsi: float = 0.0
+    macd_hist: float = 0.0
+    adx: float = 0.0
+    ema_fast: float = 0.0
+    ema_slow: float = 0.0
+    atr_pct: float = 0.0
+    stop_loss: float = 0.0
+    target: float = 0.0
+    reasons: list[str] = field(default_factory=list)
+    warnings: list[str] = field(default_factory=list)
+
+
+class RealtimeAdvisorService:
+    POLL_SECONDS = 1.0
+    BAR_CACHE_TTL_SECONDS = 20.0
+    TELEGRAM_DEBOUNCE_SECONDS = 45.0
+    CAPITAL_FOR_FO = 100_000.0
+
+    def __init__(self):
+        self._dm = DataManager()
+        self._feature_engine = FeatureEngine(interval="1m")
+        self._intraday = intraday_engine
+        self._fo_fetcher = option_chain_fetcher
+        self._fo_engine = fo_engine
+        self._telegram = make_telegram_sender_from_settings(settings)
+        self._thread = None
+        self._running = False
+        self._lock = threading.Lock()
+        self._advice: dict[str, RealtimeAdvice] = {}
+        self._last_sent: dict[str, str] = {}
+        self._last_sent_at: dict[str, float] = {}
+        self._bar_cache: dict[str, tuple[float, pd.DataFrame, str]] = {}
+        self._watchlist = set(WATCHLIST)
+        self._chart_context: dict[str, dict] = {}
+
+    def start(self) -> None:
+        if self._running:
+            return
+        self._running = True
+        self._thread = threading.Thread(
+            target=self._loop,
+            daemon=True,
+            name="RealtimeAdvisor",
+        )
+        self._thread.start()
+        logger.info("RealtimeAdvisor started")
+
+    def stop(self) -> None:
+        self._running = False
+        if self._thread:
+            self._thread.join(timeout=5)
+
+    def get(self, symbol: str) -> dict:
+        with self._lock:
+            advice = self._advice.get(symbol)
+        return asdict(advice) if advice else {}
+
+    def get_all(self) -> dict[str, dict]:
+        with self._lock:
+            return {sym: asdict(item) for sym, item in self._advice.items()}
+
+    def update_chart_context(self, payload: dict) -> dict:
+        symbol = str(payload.get("symbol", "")).strip().upper()
+        if not symbol:
+            return {"ok": False, "error": "Missing symbol"}
+
+        with self._lock:
+            self._chart_context[symbol] = {
+                "symbol": symbol,
+                "raw_symbol": payload.get("raw_symbol", ""),
+                "timeframe": payload.get("timeframe", ""),
+                "url": payload.get("url", ""),
+                "source": payload.get("source", "extension"),
+                "captured_at": payload.get(
+                    "captured_at",
+                    datetime.now(timezone.utc).isoformat(),
+                ),
+            }
+            self._watchlist.add(symbol)
+
+        return {"ok": True, "watching": symbol}
+
+    def get_chart_context(self) -> dict[str, dict]:
+        with self._lock:
+            return dict(self._chart_context)
+
+    def _loop(self) -> None:
+        while self._running:
+            started = time.time()
+            for symbol in list(self._watchlist):
+                try:
+                    advice = self._compute_advice(symbol)
+                    if advice:
+                        with self._lock:
+                            self._advice[symbol] = advice
+                        self._maybe_send_telegram(advice)
+                except Exception as exc:
+                    logger.debug(f"RealtimeAdvisor {symbol}: {exc}")
+            elapsed = time.time() - started
+            time.sleep(max(0.2, self.POLL_SECONDS - elapsed))
+
+    def _compute_advice(self, symbol: str) -> RealtimeAdvice | None:
+        candles, source = self._get_live_candles(symbol)
+        if candles.empty or len(candles) < 60:
+            return None
+
+        featured = self._feature_engine.build(candles, drop_na=False)
+        featured = featured.replace([float("inf"), float("-inf")], pd.NA)
+        valid = featured.dropna(subset=["close"])
+        if valid.empty:
+            return None
+
+        latest = valid.iloc[-1]
+        close = float(latest["close"])
+        close_series = valid["close"].astype(float)
+        ema_fast = float(close_series.ewm(span=9, adjust=False).mean().iloc[-1])
+        ema_mid = float(close_series.ewm(span=21, adjust=False).mean().iloc[-1])
+        ema_slow = float(close_series.ewm(span=50, adjust=False).mean().iloc[-1])
+
+        rsi_14 = self._safe_float(latest.get("rsi_14"), 50.0)
+        macd_hist = self._safe_float(latest.get("macd_hist"), 0.0)
+        macd_hist_prev = self._safe_float(valid["macd_hist"].iloc[-2], 0.0) if len(valid) > 1 else 0.0
+        adx_val = self._safe_float(latest.get("adx"), 18.0)
+        plus_di = self._safe_float(latest.get("plus_di"), 0.0)
+        minus_di = self._safe_float(latest.get("minus_di"), 0.0)
+        atr_pct = self._safe_float(latest.get("atr_pct"), 0.01)
+        vol_ratio = self._safe_float(latest.get("vol_ratio"), 1.0)
+
+        bias, score, regime, reasons, warnings = self._evaluate_signal(
+            close=close,
+            ema_fast=ema_fast,
+            ema_mid=ema_mid,
+            ema_slow=ema_slow,
+            rsi_14=rsi_14,
+            macd_hist=macd_hist,
+            macd_hist_prev=macd_hist_prev,
+            adx_val=adx_val,
+            plus_di=plus_di,
+            minus_di=minus_di,
+            atr_pct=atr_pct,
+            vol_ratio=vol_ratio,
+        )
+
+        base_conf = self._score_to_confidence(score)
+        if symbol in CRYPTO_24X7:
+            final_conf = max(0.30, min(0.99, base_conf))
+            entry_timing = "ACTIVE 24x7"
+            session_label = "Crypto 24x7"
+            timing_advice = "Crypto trades continuously, so act on signal quality rather than exchange hours."
+            strategy_fit = "GOOD"
+            reasons.append("Crypto trades 24x7, so there is no exchange close gate")
+        else:
+            intraday_signal = self._intraday.enhance_signal(
+                symbol=symbol,
+                bias=bias,
+                confidence=base_conf,
+                atr_pct=atr_pct,
+            )
+            final_conf = max(0.25, min(0.99, intraday_signal.adjusted_confidence))
+            entry_timing = intraday_signal.entry_timing
+            session_label = intraday_signal.session_label
+            timing_advice = intraday_signal.timing_advice
+            strategy_fit = intraday_signal.strategy_fit
+            reasons.extend(intraday_signal.session_notes[:2])
+            warnings.extend(intraday_signal.session_warnings[:2])
+
+        action = self._final_action_from_bias(bias, final_conf, strategy_fit)
+        instrument_action = action
+        instrument_symbol = ""
+        stop_loss = 0.0
+        target = 0.0
+
+        if symbol in OPTIONABLE and action in {"BUY", "SELL"} and final_conf >= 0.55:
+            fo_signal = self._build_fo_signal(symbol, bias, regime, final_conf)
+            if fo_signal:
+                instrument_action = f"BUY {fo_signal.instrument}"
+                instrument_symbol = fo_signal.symbol
+                stop_loss = fo_signal.stop_loss_prem
+                target = fo_signal.target_premium
+                reasons.extend(fo_signal.reasons[:2])
+                warnings.extend(fo_signal.warnings[:2])
+            else:
+                instrument_action = "BUY CALL" if action == "BUY" else "BUY PUT"
+
+        if action == "HOLD" and "EXIT" in entry_timing.upper():
+            instrument_action = "HOLD"
+
+        reasons = self._dedupe(reasons)[:5]
+        warnings = self._dedupe(warnings)[:3]
+
+        reason_summary = self._build_reason_summary(
+            action=instrument_action,
+            rsi=rsi_14,
+            macd_hist=macd_hist,
+            adx=adx_val,
+            reasons=reasons,
+            timing=timing_advice,
+        )
+
+        return RealtimeAdvice(
+            symbol=symbol,
+            action=action,
+            confidence=round(final_conf, 3),
+            recommended_instrument=instrument_action,
+            price=round(close, 2),
+            source=source,
+            updated_at=datetime.now(timezone.utc).isoformat(),
+            reason_summary=reason_summary,
+            session_label=session_label,
+            entry_timing=entry_timing,
+            regime=regime,
+            instrument_symbol=instrument_symbol,
+            rsi=round(rsi_14, 1),
+            macd_hist=round(macd_hist, 4),
+            adx=round(adx_val, 1),
+            ema_fast=round(ema_fast, 2),
+            ema_slow=round(ema_slow, 2),
+            atr_pct=round(atr_pct * 100, 2),
+            stop_loss=round(stop_loss, 2) if stop_loss else 0.0,
+            target=round(target, 2) if target else 0.0,
+            reasons=reasons,
+            warnings=warnings,
+        )
+
+    def _get_live_candles(self, symbol: str) -> tuple[pd.DataFrame, str]:
+        now = time.time()
+        cached = self._bar_cache.get(symbol)
+        if cached and now - cached[0] < self.BAR_CACHE_TTL_SECONDS:
+            base_df = cached[1].copy()
+            source = cached[2]
+        else:
+            base_df = self._fetch_intraday_bars(symbol)
+            source = "m1_history"
+            self._bar_cache[symbol] = (now, base_df.copy(), source)
+
+        merged = self._overlay_ticks(symbol, base_df)
+        source = "live_m1_ticks" if len(price_store.get_history(symbol, n=60)) >= 5 else source
+        return merged.tail(400), source
+
+    def _fetch_intraday_bars(self, symbol: str) -> pd.DataFrame:
+        try:
+            df = self._dm.get_ohlcv(symbol, Interval.M1, days_back=5, asset_type="index")
+        except Exception:
+            df = pd.DataFrame()
+
+        if df.empty:
+            latest_price = price_store.get(symbol, fallback=True) or self._dm.get_latest_price(symbol)
+            if not latest_price:
+                return pd.DataFrame()
+            now = pd.Timestamp.now(tz="UTC").floor("1min")
+            return pd.DataFrame(
+                {
+                    "open": [latest_price],
+                    "high": [latest_price],
+                    "low": [latest_price],
+                    "close": [latest_price],
+                    "volume": [0.0],
+                },
+                index=pd.DatetimeIndex([now], name="timestamp"),
+            )
+
+        df = df.copy()
+        df.index = pd.to_datetime(df.index, utc=True)
+        df = df.sort_index()
+        needed = ["open", "high", "low", "close", "volume"]
+        for col in needed:
+            if col not in df.columns:
+                df[col] = 0.0
+        return df[needed].astype(float)
+
+    def _overlay_ticks(self, symbol: str, base_df: pd.DataFrame) -> pd.DataFrame:
+        history = price_store.get_history(symbol, n=500)
+        if not history:
+            return base_df
+
+        tick_df = pd.DataFrame(history, columns=["timestamp", "price"])
+        tick_df["timestamp"] = pd.to_datetime(tick_df["timestamp"], utc=True)
+        tick_df = tick_df.set_index("timestamp").sort_index()
+        tick_bars = tick_df["price"].resample("1min").ohlc()
+        tick_bars["volume"] = tick_df["price"].resample("1min").count().astype(float)
+        tick_bars = tick_bars.dropna(how="all")
+
+        if base_df.empty:
+            return tick_bars.rename(columns={"open": "open", "high": "high", "low": "low", "close": "close"})
+
+        merged = pd.concat([base_df, tick_bars])
+        merged = merged[~merged.index.duplicated(keep="last")]
+        merged = merged.sort_index()
+        return merged[["open", "high", "low", "close", "volume"]]
+
+    def _evaluate_signal(
+        self,
+        *,
+        close: float,
+        ema_fast: float,
+        ema_mid: float,
+        ema_slow: float,
+        rsi_14: float,
+        macd_hist: float,
+        macd_hist_prev: float,
+        adx_val: float,
+        plus_di: float,
+        minus_di: float,
+        atr_pct: float,
+        vol_ratio: float,
+    ) -> tuple[str, float, str, list[str], list[str]]:
+        score = 0.0
+        reasons: list[str] = []
+        warnings: list[str] = []
+
+        if close > ema_fast > ema_mid > ema_slow:
+            score += 0.35
+            reasons.append("Trend aligned above EMA9, EMA21, and EMA50")
+        elif close < ema_fast < ema_mid < ema_slow:
+            score -= 0.35
+            reasons.append("Trend aligned below EMA9, EMA21, and EMA50")
+        else:
+            warnings.append("EMA stack is mixed, so trend conviction is weaker")
+
+        if macd_hist > 0 and macd_hist >= macd_hist_prev:
+            score += 0.20
+            reasons.append("MACD histogram is positive and improving")
+        elif macd_hist < 0 and macd_hist <= macd_hist_prev:
+            score -= 0.20
+            reasons.append("MACD histogram is negative and weakening further")
+
+        if 55 <= rsi_14 <= 68:
+            score += 0.18
+            reasons.append(f"RSI {rsi_14:.0f} supports bullish continuation")
+        elif 32 <= rsi_14 <= 45:
+            score -= 0.18
+            reasons.append(f"RSI {rsi_14:.0f} supports bearish continuation")
+        elif rsi_14 >= 72:
+            score -= 0.08
+            warnings.append(f"RSI {rsi_14:.0f} is stretched on the upside")
+        elif rsi_14 <= 28:
+            score += 0.08
+            warnings.append(f"RSI {rsi_14:.0f} is washed out and bounce-prone")
+
+        if adx_val >= 25:
+            score += 0.12 if plus_di >= minus_di else -0.12
+            reasons.append(f"ADX {adx_val:.0f} confirms directional strength")
+        elif adx_val < 18:
+            warnings.append(f"ADX {adx_val:.0f} says the market is choppy")
+
+        if vol_ratio >= 1.15:
+            reasons.append("Relative volume is supportive")
+        elif vol_ratio < 0.85:
+            warnings.append("Volume confirmation is weak")
+            score *= 0.92
+
+        regime = self._infer_regime(close, ema_mid, ema_slow, adx_val, atr_pct)
+        if regime == "VOLATILE":
+            warnings.append("ATR is elevated, so size should stay smaller")
+            score *= 0.9
+
+        if score >= 0.50:
+            bias = "STRONG BUY"
+        elif score >= 0.18:
+            bias = "BUY"
+        elif score <= -0.50:
+            bias = "STRONG SELL"
+        elif score <= -0.18:
+            bias = "SELL"
+        else:
+            bias = "HOLD"
+
+        return bias, score, regime, reasons, warnings
+
+    def _build_fo_signal(
+        self,
+        symbol: str,
+        bias: str,
+        regime: str,
+        confidence: float,
+    ):
+        try:
+            chain = self._fo_fetcher.get_chain(symbol)
+            if not chain:
+                return None
+            return self._fo_engine.analyse(
+                underlying=symbol,
+                chain=chain,
+                underlying_bias=bias,
+                regime=regime,
+                confidence=confidence,
+                available_capital=self.CAPITAL_FOR_FO,
+            )
+        except Exception as exc:
+            logger.debug(f"RealtimeAdvisor F&O {symbol}: {exc}")
+            return None
+
+    def _final_action_from_bias(self, bias: str, confidence: float, strategy_fit: str) -> str:
+        if "BUY" in bias and confidence >= 0.48 and strategy_fit != "POOR":
+            return "BUY"
+        if "SELL" in bias and confidence >= 0.48 and strategy_fit != "POOR":
+            return "SELL"
+        return "HOLD"
+
+    def _infer_regime(
+        self,
+        close: float,
+        ema_mid: float,
+        ema_slow: float,
+        adx_val: float,
+        atr_pct: float,
+    ) -> str:
+        if atr_pct >= 0.03:
+            return "VOLATILE"
+        if adx_val >= 24 and close >= ema_mid >= ema_slow:
+            return "TRENDING_UP"
+        if adx_val >= 24 and close <= ema_mid <= ema_slow:
+            return "TRENDING_DOWN"
+        return "RANGING"
+
+    def _score_to_confidence(self, score: float) -> float:
+        return round(min(0.95, max(0.40, 0.48 + abs(score) * 0.55)), 3)
+
+    def _build_reason_summary(
+        self,
+        *,
+        action: str,
+        rsi: float,
+        macd_hist: float,
+        adx: float,
+        reasons: list[str],
+        timing: str,
+    ) -> str:
+        parts = []
+        if reasons:
+            parts.append(reasons[0])
+        if len(reasons) > 1:
+            parts.append(reasons[1])
+        parts.append(f"RSI {rsi:.0f}")
+        parts.append(f"MACD {'bullish' if macd_hist >= 0 else 'bearish'}")
+        parts.append(f"ADX {adx:.0f}")
+        if timing:
+            parts.append(timing)
+        return " | ".join(parts[:5])
+
+    def _maybe_send_telegram(self, advice: RealtimeAdvice) -> None:
+        if not self._telegram or not self._telegram.is_configured:
+            return
+
+        now = time.time()
+        signature = (
+            f"{advice.recommended_instrument}|{round(advice.confidence, 2)}|"
+            f"{advice.session_label}|{advice.entry_timing}"
+        )
+        if advice.action == "HOLD":
+            return
+        if self._last_sent.get(advice.symbol) == signature:
+            return
+        if now - self._last_sent_at.get(advice.symbol, 0) < self.TELEGRAM_DEBOUNCE_SECONDS:
+            return
+
+        # Build signal dict and use format_signal_telegram directly
+        # This guarantees SL/Target/exit conditions in every message
+        try:
+            from src.alerts.signal_formatter import format_signal_telegram
+
+            # Get live USDINR
+            usdinr = 92.46
+            try:
+                _u = price_store.get("USDINR", fallback=False)
+                if _u and 70 < float(_u) < 120:
+                    usdinr = float(_u)
+            except Exception:
+                pass
+
+            # Convert price to INR for crypto/commodity symbols
+            # realtime_advisor stores raw USD for BTC/ETH (from BTC-USD yfinance)
+            # The formatter expects INR price so SL/Target % are correct
+            CRYPTO_SYMS = {
+                "BTC","ETH","SOL","BNB","XRP","ADA","DOGE","AVAX",
+                "DOT","MATIC","LTC","LINK","UNI","ATOM",
+            }
+            signal_price = advice.price
+            if advice.symbol.upper() in CRYPTO_SYMS:
+                # advice.price is in USD — convert to INR
+                signal_price = advice.price * usdinr
+
+            # Build reasons list
+            reasons = list(advice.reasons or [])
+            if advice.warnings:
+                reasons.extend([f"⚠️ {w}" for w in advice.warnings[:2]])
+
+            # Determine hold type
+            s_lower = (advice.session_label or "").lower()
+            if any(x in s_lower for x in ["crypto", "24x7"]):
+                hold_type = "SWING"
+            elif any(x in s_lower for x in ["open", "close", "intraday"]):
+                hold_type = "INTRADAY"
+            else:
+                hold_type = "SWING"
+
+            # Extract base action (BUY/SELL) from recommended_instrument
+            # e.g. "BUY CALL" → "BUY", "SELL" → "SELL", "BUY PUT" → "SELL"
+            rec = advice.recommended_instrument.upper()
+            if "PUT" in rec or "SELL" in rec:
+                bias = "SELL"
+            else:
+                bias = "BUY"
+
+            # Convert crypto USD price → INR for correct SL/Target
+
+            CRYPTO_SYMS_CONV = {
+
+                "BTC","ETH","SOL","BNB","XRP","ADA","DOGE","AVAX",
+
+                "DOT","MATIC","LTC","LINK","UNI","ATOM",
+
+            }
+
+            signal_price = advice.price
+
+            if advice.symbol.upper() in CRYPTO_SYMS_CONV:
+
+                signal_price = advice.price * usdinr
+
+            
+
+            message = format_signal_telegram(advice.symbol, {
+                "bias":          bias,
+                "price":         signal_price,  # INR for crypto, raw for others
+                "confidence":    advice.confidence,
+                "regime":        advice.regime,
+                "hold_type":     hold_type,
+                "action":        "ENTER",
+                "session_label": advice.session_label or "",
+                "entry_timing":  advice.entry_timing or "ENTER",
+                "reasons":       reasons,
+                "atr_pct":       advice.atr_pct / 100 if advice.atr_pct else None,
+            }, usdinr=usdinr)
+
+        except Exception as exc:
+            logger.debug(f"RealtimeAdvisor signal_formatter failed, using basic: {exc}")
+            # Fallback: plain message (will still be intercepted by _enrich_if_signal)
+            action_str = advice.recommended_instrument or advice.action
+            message = (
+                f"{advice.symbol} Action: {action_str} "
+                f"Confidence: `{advice.confidence:.0%}` "
+                f"Price: `{signal_price:,.2f}` "
+                f"Session: `{advice.session_label or '-'}` "
+                f"Timing: `{advice.entry_timing or '-'}` "
+                f"Regime: `{advice.regime}` "
+                f"Reason: {advice.reason_summary}"
+            )
+            if advice.warnings:
+                message += f" Warning: {advice.warnings[0]}"
+
+        try:
+            self._telegram.send_message(message)
+            self._last_sent[advice.symbol] = signature
+            self._last_sent_at[advice.symbol] = now
+        except Exception as exc:
+            logger.debug(f"RealtimeAdvisor Telegram {advice.symbol}: {exc}")
+
+    @staticmethod
+    def _safe_float(value, default: float) -> float:
+        try:
+            if pd.isna(value):
+                return default
+            return float(value)
+        except Exception:
+            return default
+
+    @staticmethod
+    def _dedupe(items: list[str]) -> list[str]:
+        seen = set()
+        out = []
+        for item in items:
+            key = item.strip()
+            if not key or key in seen:
+                continue
+            seen.add(key)
+            out.append(key)
+        return out
+
+
+realtime_advisor = RealtimeAdvisorService()

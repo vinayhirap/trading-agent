@@ -1,0 +1,96 @@
+{% extends "base.html" %}
+{% block title %}Event Monitor — AI Trading Agent{% endblock %}
+{% block content %}
+<div class="page-hd">
+  <div><div class="page-title">Event Monitor</div>
+  <div class="page-sub">Global macro events · Earnings · RBI · Fed · Impact scoring</div></div>
+  <div class="page-actions">
+    <button class="btn btn-ghost btn-sm" onclick="loadEvents()">↻ Refresh</button>
+  </div>
+</div>
+
+<div class="kpi-row" style="grid-template-columns:repeat(4,1fr)">
+  <div class="kpi"><div class="kpi-lbl">High Impact</div><div class="kpi-val dn" id="e-high">—</div></div>
+  <div class="kpi"><div class="kpi-lbl">Medium Impact</div><div class="kpi-val" id="e-med">—</div><div class="kpi-sub" style="color:var(--gold)">Today</div></div>
+  <div class="kpi"><div class="kpi-lbl">Low Impact</div><div class="kpi-val" id="e-low">—</div></div>
+  <div class="kpi"><div class="kpi-lbl">Market Dampening</div><div class="kpi-val" id="e-damp">—</div><div class="kpi-sub">Severity-scaled</div></div>
+</div>
+
+<div class="g2" style="margin-top:14px">
+  <div class="card">
+    <div class="card-hd">Upcoming Events <span class="dim" id="evt-count" style="font-size:10px"></span></div>
+    <div id="event-list" style="display:flex;flex-direction:column;gap:8px">
+      <div style="text-align:center;padding:30px;color:var(--txt-3)"><div class="spin" style="margin:0 auto 8px"></div>Loading events…</div>
+    </div>
+  </div>
+  <div class="gap">
+    <div class="card">
+      <div class="card-hd">Indian Market Calendar</div>
+      <div style="display:flex;flex-direction:column;gap:6px">
+        {% for e in [
+          ("RBI MPC Meeting","Monetary policy — rate decisions","🏦","HIGH"),
+          ("NSE Derivatives Expiry","Monthly F&O expiry — high volatility","📅","HIGH"),
+          ("Union Budget","Annual budget — sector rotation","💼","HIGH"),
+          ("Quarterly Results","Earnings season — stock specific","📊","MED"),
+          ("US Fed Meeting","Global risk-off/on trigger","🇺🇸","HIGH"),
+          ("CPI/WPI Data","Inflation data — bond & currency impact","📈","MED"),
+        ] %}
+        <div style="display:flex;gap:10px;align-items:center;padding:6px 8px;background:var(--bg-3);border-radius:5px">
+          <span style="font-size:16px">{{ e[2] }}</span>
+          <div style="flex:1">
+            <div style="font-size:11px;font-weight:600;color:var(--txt)">{{ e[0] }}</div>
+            <div style="font-size:10px;color:var(--txt-3)">{{ e[1] }}</div>
+          </div>
+          <span class="sent-badge {{ 'sent-neg' if e[3]=='HIGH' else 'sent-neu' }}" style="font-size:8px">{{ e[3] }}</span>
+        </div>
+        {% endfor %}
+      </div>
+    </div>
+    <div class="card">
+      <div class="card-hd">Impact on Trading System</div>
+      <div style="display:flex;flex-direction:column;gap:8px;font-size:11px;color:var(--txt-2)">
+        <p>The system applies <strong style="color:var(--txt)">dynamic event dampening</strong> to signal confidence during high-impact events.</p>
+        <p>Formula: <code style="color:var(--gold);background:var(--bg-4);padding:2px 6px;border-radius:3px">dampened = confidence × (1 - severity × 0.3)</code></p>
+        <p>High-severity events (RBI/Fed/Budget) reduce confidence by up to 30%, pushing borderline signals below the 55% gate.</p>
+      </div>
+    </div>
+  </div>
+</div>
+{% endblock %}
+{% block extra_js %}
+<script>
+async function loadEvents() {
+  // Simulate structured event data (replace with real API when available)
+  const events = [
+    {title:"US Fed Interest Rate Decision",date:"2026-05-07",impact:"HIGH",country:"🇺🇸",note:"Market expects hold at 4.25-4.5%"},
+    {title:"RBI MPC Meeting",date:"2026-06-04",impact:"HIGH",country:"🇮🇳",note:"Rate decision — CPI watch"},
+    {title:"NSE Monthly Expiry",date:"2026-04-24",impact:"HIGH",country:"🇮🇳",note:"High volatility expected near close"},
+    {title:"US CPI Data",date:"2026-05-13",impact:"MEDIUM",country:"🇺🇸",note:"Inflation print — risk sentiment driver"},
+    {title:"India GDP Q4",date:"2026-05-29",impact:"MEDIUM",country:"🇮🇳",note:"Growth data — broad market impact"},
+    {title:"OPEC+ Meeting",date:"2026-05-05",impact:"MEDIUM",country:"🌍",note:"Production decision — crude price driver"},
+  ];
+  document.getElementById("e-high").textContent = events.filter(e=>e.impact==="HIGH").length;
+  document.getElementById("e-med").textContent  = events.filter(e=>e.impact==="MEDIUM").length;
+  document.getElementById("e-low").textContent  = events.filter(e=>e.impact==="LOW").length;
+  document.getElementById("e-damp").textContent = "Active";
+  document.getElementById("evt-count").textContent = `${events.length} events`;
+  document.getElementById("event-list").innerHTML = events.map(e => {
+    const cls = e.impact==="HIGH"?"sent-neg":e.impact==="MEDIUM"?"":"sent-neu";
+    const daysLeft = Math.ceil((new Date(e.date)-new Date())/86400000);
+    return `<div style="padding:10px 12px;background:var(--bg-3);border-radius:6px;border-left:2px solid ${e.impact==="HIGH"?"var(--red)":e.impact==="MEDIUM"?"var(--gold)":"var(--txt-3)"}">
+      <div style="display:flex;justify-content:space-between;align-items:flex-start">
+        <div>
+          <div style="font-size:12px;font-weight:600;color:var(--txt)">${e.country} ${e.title}</div>
+          <div style="font-size:10px;color:var(--txt-3);margin-top:3px">${e.note}</div>
+        </div>
+        <div style="text-align:right;flex-shrink:0;margin-left:12px">
+          <span class="sent-badge ${cls}" style="font-size:8px">${e.impact}</span>
+          <div style="font-size:10px;color:var(--txt-3);margin-top:4px">${daysLeft>0?`in ${daysLeft}d`:daysLeft===0?"TODAY":"past"}</div>
+        </div>
+      </div>
+    </div>`;
+  }).join("");
+}
+loadEvents();
+</script>
+{% endblock %}

@@ -1,0 +1,493 @@
+<!DOCTYPE html>
+<html lang="en">
+<head>
+<meta charset="UTF-8">
+<meta name="viewport" content="width=device-width, initial-scale=1.0">
+<title>{% block title %}AI Trading Agent{% endblock %}</title>
+<link rel="preconnect" href="https://fonts.googleapis.com">
+<link href="https://fonts.googleapis.com/css2?family=JetBrains+Mono:wght@300;400;500;600&family=Syne:wght@400;500;600;700;800&display=swap" rel="stylesheet">
+<script defer src="https://cdn.jsdelivr.net/npm/alpinejs@3.x.x/dist/cdn.min.js"></script>
+<style>
+/* ═══════════════════════════════════════════════════════════
+   AI TRADING AGENT — DESIGN SYSTEM v3
+   Aesthetic: Dark terminal meets precision instrument
+   Fonts: Syne (UI) + JetBrains Mono (data)
+   ═══════════════════════════════════════════════════════════ */
+:root {
+  --bg:         #06060c;
+  --bg-1:       #0b0b14;
+  --bg-2:       #0f0f1a;
+  --bg-3:       #141424;
+  --bg-4:       #1a1a2e;
+  --border:     rgba(255,255,255,0.06);
+  --border-2:   rgba(255,255,255,0.10);
+  --border-3:   rgba(255,255,255,0.16);
+  --txt:        #e2e2f0;
+  --txt-2:      #8888aa;
+  --txt-3:      #44445e;
+  --mono:       #b0b0d0;
+  --green:      #00e87a;
+  --green-glow: rgba(0,232,122,0.15);
+  --green-dim:  rgba(0,232,122,0.08);
+  --red:        #ff3366;
+  --red-glow:   rgba(255,51,102,0.15);
+  --red-dim:    rgba(255,51,102,0.08);
+  --blue:       #4488ff;
+  --blue-dim:   rgba(68,136,255,0.10);
+  --gold:       #ffaa00;
+  --gold-dim:   rgba(255,170,0,0.10);
+  --purple:     #8855ff;
+  --sidebar:    220px;
+  --topbar:     48px;
+  --r:          8px;
+  --r-sm:       5px;
+  --font:       'Syne', sans-serif;
+  --mono-font:  'JetBrains Mono', monospace;
+}
+
+*,*::before,*::after{box-sizing:border-box;margin:0;padding:0}
+html,body{height:100%;background:var(--bg);color:var(--txt);font-family:var(--font);font-size:13px;line-height:1.5;-webkit-font-smoothing:antialiased}
+::-webkit-scrollbar{width:3px;height:3px}
+::-webkit-scrollbar-track{background:transparent}
+::-webkit-scrollbar-thumb{background:var(--border-2);border-radius:2px}
+a{color:inherit;text-decoration:none}
+button{font-family:var(--font);cursor:pointer}
+
+/* ── App shell ─────────────────────────────────────────────── */
+.shell{display:grid;grid-template-columns:var(--sidebar) 1fr;grid-template-rows:var(--topbar) 1fr;height:100vh;overflow:hidden}
+
+/* ── Topbar ─────────────────────────────────────────────────── */
+.topbar{
+  grid-column:1/-1;
+  display:flex;align-items:center;padding:0 16px;gap:12px;
+  background:var(--bg-1);border-bottom:1px solid var(--border);
+  position:relative;z-index:50
+}
+.logo{display:flex;align-items:center;gap:8px;flex-shrink:0;margin-right:8px}
+.logo-mark{
+  width:30px;height:30px;border-radius:7px;
+  background:linear-gradient(135deg,var(--green),var(--blue));
+  display:flex;align-items:center;justify-content:center;font-size:15px
+}
+.logo-name{font-size:14px;font-weight:700;letter-spacing:-0.01em}
+
+/* Header ticker strip */
+.ticker-strip{display:flex;gap:2px;flex:1;overflow:hidden;min-width:0}
+.t-chip{
+  display:flex;align-items:center;gap:5px;padding:5px 9px;
+  background:var(--bg-2);border:1px solid var(--border);
+  border-radius:var(--r-sm);white-space:nowrap;flex-shrink:0;
+  transition:border-color .3s
+}
+.t-chip.flash-up{border-color:var(--green);box-shadow:0 0 8px var(--green-glow)}
+.t-chip.flash-dn{border-color:var(--red);box-shadow:0 0 8px var(--red-glow)}
+.t-sym{font-size:9px;font-weight:700;color:var(--txt-3);letter-spacing:.06em;text-transform:uppercase}
+.t-val{font-family:var(--mono-font);font-size:12px;font-weight:500;color:var(--txt)}
+.t-chg{font-family:var(--mono-font);font-size:10px}
+.t-chg.up{color:var(--green)}.t-chg.dn{color:var(--red)}
+
+/* Market status */
+.mkt-badge{
+  display:flex;align-items:center;gap:5px;padding:4px 10px;
+  border-radius:999px;font-size:10px;font-weight:700;letter-spacing:.06em;
+  flex-shrink:0
+}
+.mkt-badge.open{background:var(--green-dim);color:var(--green);border:1px solid rgba(0,232,122,.3)}
+.mkt-badge.closed{background:var(--red-dim);color:var(--red);border:1px solid rgba(255,51,102,.3)}
+.pulse-dot{width:5px;height:5px;border-radius:50%;background:currentColor;animation:pulse 2s infinite}
+@keyframes pulse{0%,100%{opacity:1}50%{opacity:.3}}
+
+.topbar-right{display:flex;align-items:center;gap:10px;margin-left:auto;flex-shrink:0}
+.clock{font-family:var(--mono-font);font-size:11px;color:var(--txt-2)}
+.ws-dot{width:6px;height:6px;border-radius:50%;background:var(--red)}
+.ws-dot.connected{background:var(--green);box-shadow:0 0 6px var(--green)}
+
+/* ── Sidebar ─────────────────────────────────────────────────── */
+.sidebar{
+  background:var(--bg-1);border-right:1px solid var(--border);
+  overflow-y:auto;padding:10px 6px;
+  display:flex;flex-direction:column;gap:1px
+}
+.nav-label{
+  padding:12px 10px 4px;
+  font-size:8px;font-weight:700;letter-spacing:.14em;text-transform:uppercase;
+  color:var(--txt-3)
+}
+.nav-link{
+  display:flex;align-items:center;gap:8px;padding:8px 10px;
+  border-radius:var(--r-sm);color:var(--txt-2);font-size:12px;font-weight:500;
+  transition:all .15s;position:relative;
+}
+.nav-link:hover{background:var(--bg-3);color:var(--txt)}
+.nav-link.active{background:var(--bg-4);color:var(--txt)}
+.nav-link.active::before{
+  content:'';position:absolute;left:0;top:25%;height:50%;
+  width:2px;background:var(--blue);border-radius:0 2px 2px 0
+}
+.nav-icon{font-size:13px;width:16px;text-align:center;flex-shrink:0}
+
+/* Sidebar price list */
+.sb-prices{
+  margin-top:auto;padding:10px 4px 4px;
+  border-top:1px solid var(--border)
+}
+.sb-row{
+  display:flex;justify-content:space-between;align-items:center;
+  padding:4px 6px;border-radius:4px;transition:background .15s
+}
+.sb-row:hover{background:var(--bg-3)}
+.sb-sym{font-size:10px;color:var(--txt-3);font-weight:600;letter-spacing:.04em}
+.sb-val{font-family:var(--mono-font);font-size:11px;color:var(--txt)}
+.sb-val.up{color:var(--green)}.sb-val.dn{color:var(--red)}
+
+/* ── Main ────────────────────────────────────────────────────── */
+.main{overflow-y:auto;padding:22px 26px;background:var(--bg)}
+
+/* ── Page header ─────────────────────────────────────────────── */
+.page-hd{
+  display:flex;align-items:flex-start;justify-content:space-between;
+  margin-bottom:22px;padding-bottom:18px;
+  border-bottom:1px solid var(--border)
+}
+.page-title{font-size:22px;font-weight:800;letter-spacing:-.02em;color:var(--txt)}
+.page-sub{font-size:12px;color:var(--txt-2);margin-top:3px}
+.page-actions{display:flex;gap:8px;align-items:center}
+
+/* ── KPI tiles ───────────────────────────────────────────────── */
+.kpi-row{display:grid;grid-template-columns:repeat(auto-fit,minmax(150px,1fr));gap:10px;margin-bottom:18px}
+.kpi{
+  background:var(--bg-2);border:1px solid var(--border);border-radius:var(--r);
+  padding:14px 16px;transition:border-color .2s
+}
+.kpi:hover{border-color:var(--border-2)}
+.kpi-lbl{font-size:9px;font-weight:700;letter-spacing:.10em;text-transform:uppercase;color:var(--txt-3);margin-bottom:8px}
+.kpi-val{font-family:var(--mono-font);font-size:20px;font-weight:600;color:var(--txt);line-height:1;margin-bottom:4px}
+.kpi-sub{font-family:var(--mono-font);font-size:10px;color:var(--txt-2)}
+.kpi-sub.up{color:var(--green)}.kpi-sub.dn{color:var(--red)}
+
+/* ── Card ────────────────────────────────────────────────────── */
+.card{background:var(--bg-2);border:1px solid var(--border);border-radius:var(--r);padding:16px}
+.card-hd{font-size:10px;font-weight:700;letter-spacing:.09em;text-transform:uppercase;color:var(--txt-2);margin-bottom:14px;display:flex;align-items:center;justify-content:space-between}
+.divider{height:1px;background:var(--border);margin:14px 0}
+
+/* ── Grid helpers ────────────────────────────────────────────── */
+.g2{display:grid;grid-template-columns:1fr 1fr;gap:14px}
+.g3{display:grid;grid-template-columns:1fr 1fr 1fr;gap:14px}
+.g4{display:grid;grid-template-columns:repeat(4,1fr);gap:10px}
+.gap{display:flex;flex-direction:column;gap:14px}
+
+/* ── Signal card ─────────────────────────────────────────────── */
+.sig-card{
+  background:var(--bg-2);border:1px solid var(--border);border-radius:var(--r);
+  padding:12px 14px;transition:all .2s;cursor:default
+}
+.sig-card:hover{border-color:var(--border-2);transform:translateY(-1px)}
+.sig-card.buy{border-top:2px solid var(--green)}
+.sig-card.sell{border-top:2px solid var(--red)}
+.sig-card.hold{border-top:2px solid var(--txt-3)}
+.sig-sym{font-size:13px;font-weight:700;color:var(--txt)}
+.sig-px{font-family:var(--mono-font);font-size:11px;color:var(--txt-2);margin-top:2px}
+.sig-badge{
+  display:inline-flex;align-items:center;gap:4px;padding:3px 8px;
+  border-radius:4px;font-size:9px;font-weight:700;letter-spacing:.07em;margin:8px 0
+}
+.b-buy{background:var(--green-dim);color:var(--green);border:1px solid rgba(0,232,122,.3)}
+.b-sell{background:var(--red-dim);color:var(--red);border:1px solid rgba(255,51,102,.3)}
+.b-hold{background:var(--bg-4);color:var(--txt-2);border:1px solid var(--border)}
+.conf-track{height:2px;background:var(--bg-4);border-radius:2px;overflow:hidden;margin-top:6px}
+.conf-fill{height:100%;border-radius:2px;transition:width .5s}
+.conf-fill.buy{background:var(--green)}.conf-fill.sell{background:var(--red)}.conf-fill.hold{background:var(--txt-3)}
+.sig-tags{display:flex;gap:5px;flex-wrap:wrap;margin-top:8px}
+.tag{font-size:9px;color:var(--txt-3);background:var(--bg-4);padding:2px 6px;border-radius:3px}
+
+/* ── Regime badges ───────────────────────────────────────────── */
+.regime{display:inline-flex;align-items:center;gap:3px;padding:2px 7px;border-radius:3px;font-size:8px;font-weight:700;letter-spacing:.06em}
+.r-up{background:var(--green-dim);color:var(--green)}
+.r-dn{background:var(--red-dim);color:var(--red)}
+.r-rg{background:var(--blue-dim);color:var(--blue)}
+.r-vl{background:var(--gold-dim);color:var(--gold)}
+
+/* ── Table ───────────────────────────────────────────────────── */
+.tbl-wrap{overflow-x:auto}
+table{width:100%;border-collapse:collapse;font-size:12px}
+th{text-align:left;padding:8px 12px;font-size:8px;font-weight:700;letter-spacing:.12em;text-transform:uppercase;color:var(--txt-3);border-bottom:1px solid var(--border);white-space:nowrap}
+td{padding:9px 12px;border-bottom:1px solid var(--border);color:var(--mono);font-family:var(--mono-font);font-size:11px}
+td.ui{font-family:var(--font);font-weight:600;color:var(--txt);font-size:12px}
+td.up{color:var(--green)}td.dn{color:var(--red)}
+tr:last-child td{border-bottom:none}
+tr:hover td{background:var(--bg-3)}
+
+/* ── Buttons ─────────────────────────────────────────────────── */
+.btn{display:inline-flex;align-items:center;gap:6px;padding:7px 14px;border-radius:var(--r-sm);font-size:12px;font-weight:600;border:none;transition:all .15s;font-family:var(--font);cursor:pointer;line-height:1}
+.btn-primary{background:var(--blue);color:#fff}
+.btn-primary:hover{background:#5599ff;box-shadow:0 0 16px var(--blue-dim)}
+.btn-green{background:var(--green-dim);color:var(--green);border:1px solid rgba(0,232,122,.3)}
+.btn-green:hover{background:var(--green);color:#000}
+.btn-red{background:var(--red-dim);color:var(--red);border:1px solid rgba(255,51,102,.3)}
+.btn-red:hover{background:var(--red);color:#fff}
+.btn-ghost{background:transparent;color:var(--txt-2);border:1px solid var(--border)}
+.btn-ghost:hover{border-color:var(--border-2);color:var(--txt)}
+.btn-sm{padding:5px 10px;font-size:11px}
+.btn-icon{padding:6px;border-radius:var(--r-sm)}
+
+/* ── Form inputs ─────────────────────────────────────────────── */
+.inp{background:var(--bg);border:1px solid var(--border);border-radius:var(--r-sm);padding:8px 12px;color:var(--txt);font-size:12px;font-family:var(--font);outline:none;width:100%;transition:border-color .15s}
+.inp:focus{border-color:var(--blue)}
+.sel{background:var(--bg);border:1px solid var(--border);border-radius:var(--r-sm);padding:8px 12px;color:var(--txt);font-size:12px;font-family:var(--font);outline:none;cursor:pointer}
+.sel:focus{border-color:var(--blue)}
+.lbl{font-size:10px;font-weight:600;color:var(--txt-2);display:block;margin-bottom:5px;letter-spacing:.04em}
+.fg{margin-bottom:12px}
+
+/* ── Toast ───────────────────────────────────────────────────── */
+.toast-wrap{position:fixed;bottom:20px;right:20px;z-index:9999;display:flex;flex-direction:column;gap:8px;pointer-events:none}
+.toast{
+  background:var(--bg-2);border:1px solid var(--border-2);border-radius:var(--r);
+  padding:12px 16px;font-size:12px;max-width:300px;pointer-events:auto;
+  display:flex;align-items:flex-start;gap:10px;
+  animation:slide-in .25s ease
+}
+@keyframes slide-in{from{transform:translateX(110%);opacity:0}to{transform:none;opacity:1}}
+.toast.ok{border-left:3px solid var(--green)}.toast.err{border-left:3px solid var(--red)}.toast.inf{border-left:3px solid var(--blue)}
+
+/* ── Misc ────────────────────────────────────────────────────── */
+.spin{width:14px;height:14px;border:2px solid var(--border);border-top-color:var(--blue);border-radius:50%;animation:spin .7s linear infinite;flex-shrink:0}
+@keyframes spin{to{transform:rotate(360deg)}}
+.live{display:inline-block;width:6px;height:6px;border-radius:50%;background:var(--green);animation:pulse 2s infinite}
+.mono{font-family:var(--mono-font)}
+.up{color:var(--green)}.dn{color:var(--red)}
+.dim{color:var(--txt-2)}
+
+/* ── Responsive ─────────────────────────────────────────────── */
+@media(max-width:768px){
+  .shell{grid-template-columns:1fr}
+  .sidebar{display:none}
+  .g4{grid-template-columns:1fr 1fr}
+  .g3,.g2{grid-template-columns:1fr}
+  .ticker-strip{display:none}
+}
+
+{% block extra_css %}{% endblock %}
+</style>
+</head>
+
+<body>
+<div class="shell">
+
+<!-- ═══ TOPBAR ═══════════════════════════════════════════════ -->
+<header class="topbar">
+  <a href="/" class="logo">
+    <div class="logo-mark">⚡</div>
+    <span class="logo-name">AI Trading</span>
+  </a>
+
+  <!-- Live ticker — updated every 1s via WebSocket -->
+  <div class="ticker-strip" id="ticker-strip">
+    {% for sym in ["NIFTY50","BANKNIFTY","GOLD","CRUDEOIL","BTC","ETH","USDINR"] %}
+    <div class="t-chip" id="tc-{{ sym }}">
+      <span class="t-sym">{{ sym }}</span>
+      <span class="t-val" id="tv-{{ sym }}">—</span>
+    </div>
+    {% endfor %}
+  </div>
+
+  <div class="topbar-right">
+    <!-- Market status -->
+    {% if market.nse_open %}
+    <div class="mkt-badge open"><span class="pulse-dot"></span>NSE OPEN</div>
+    {% else %}
+    <div class="mkt-badge closed"><span class="pulse-dot"></span>NSE CLOSED</div>
+    {% endif %}
+
+    <!-- WS connection indicator -->
+    <div id="ws-indicator" class="ws-dot" title="WebSocket disconnected"></div>
+
+    <!-- Clock -->
+    <span class="clock" id="live-clock">—</span>
+  </div>
+</header>
+
+<!-- ═══ SIDEBAR ══════════════════════════════════════════════ -->
+<nav class="sidebar">
+  <span class="nav-label">Markets</span>
+  <a href="/"         class="nav-link {{ 'active' if active_page == 'dashboard' }}"><span class="nav-icon">📊</span>Dashboard</a>
+  <a href="/scanner"  class="nav-link {{ 'active' if active_page == 'scanner' }}"><span class="nav-icon">🔍</span>Signal Scanner</a>
+  <a href="/charts"   class="nav-link {{ 'active' if active_page == 'charts' }}"><span class="nav-icon">📈</span>Charts</a>
+  <a href="/crude"    class="nav-link {{ 'active' if active_page == 'crude' }}"><span class="nav-icon">🛢️</span>Crude Intel</a>
+
+  <span class="nav-label">Intelligence</span>
+  <a href="/news"         class="nav-link {{ 'active' if active_page == 'news' }}"><span class="nav-icon">📰</span>News Feed</a>
+  <a href="/nerve-center" class="nav-link {{ 'active' if active_page == 'nerve_center' }}"><span class="nav-icon">🧠</span>Nerve Center</a>
+  <a href="/ai"           class="nav-link {{ 'active' if active_page == 'ai' }}"><span class="nav-icon">🤖</span>AI Insights</a>
+  <a href="/events"       class="nav-link {{ 'active' if active_page == 'events' }}"><span class="nav-icon">🌍</span>Events</a>
+  <a href="/timing"       class="nav-link {{ 'active' if active_page == 'timing' }}"><span class="nav-icon">⏰</span>Timing</a>
+
+  <span class="nav-label">Analytics</span>
+  <a href="/regime"       class="nav-link {{ 'active' if active_page == 'regime' }}"><span class="nav-icon">🔭</span>Regime Detector</a>
+  <a href="/fii-dii"      class="nav-link {{ 'active' if active_page == 'fii_dii' }}"><span class="nav-icon">📡</span>FII/DII Tracker</a>
+  <a href="/options-oi"   class="nav-link {{ 'active' if active_page == 'options_oi' }}"><span class="nav-icon">📊</span>Options OI</a>
+
+  <span class="nav-label">Trading</span>
+  <a href="/trade"        class="nav-link {{ 'active' if active_page == 'trade' }}"><span class="nav-icon">📟</span>Trade</a>
+  <a href="/alerts"       class="nav-link {{ 'active' if active_page == 'alerts' }}"><span class="nav-icon">🔔</span>Alerts</a>
+  <a href="/portfolio"    class="nav-link {{ 'active' if active_page == 'portfolio' }}"><span class="nav-icon">💼</span>Portfolio</a>
+  <a href="/backtest"     class="nav-link {{ 'active' if active_page == 'backtest' }}"><span class="nav-icon">📊</span>Backtest</a>
+
+  <span class="nav-label">System</span>
+  <a href="/accuracy"     class="nav-link {{ 'active' if active_page == 'accuracy' }}"><span class="nav-icon">🎯</span>Accuracy</a>
+  <a href="/status"       class="nav-link {{ 'active' if active_page == 'status' }}"><span class="nav-icon">⚙️</span>Status</a>
+  <a href="/system-health"class="nav-link {{ 'active' if active_page == 'system_health' }}"><span class="nav-icon">🏥</span>System Health</a>
+
+  <!-- Mini price board -->
+  <div class="sb-prices" id="sb-prices">
+    {% for sym in ["NIFTY50","BANKNIFTY","NIFTYIT","SENSEX","GOLD","SILVER","CRUDEOIL","BTC","ETH","USDINR"] %}
+    <div class="sb-row">
+      <span class="sb-sym">{{ sym }}</span>
+      <span class="sb-val" id="sb-{{ sym }}">—</span>
+    </div>
+    {% endfor %}
+  </div>
+</nav>
+
+<!-- ═══ MAIN ══════════════════════════════════════════════════ -->
+<main class="main">
+  {% block content %}{% endblock %}
+</main>
+
+</div>
+
+<!-- Toast container -->
+<div class="toast-wrap" id="toasts"></div>
+
+<!-- ═══ GLOBAL JS ════════════════════════════════════════════ -->
+<script>
+/* ════════════════════════════════════════════════════════════
+   PRICE FORMATTER — identical logic to Python convert_price()
+   ════════════════════════════════════════════════════════════ */
+const PTS_SYMS  = new Set(["NIFTY50","BANKNIFTY","NIFTYIT","SENSEX","NIFTYMID","FINNIFTY","NIFTYPHARMA","NIFTYAUTO","NIFTYFMCG"]);
+const FOREX_INR = new Set(["USDINR","EURINR","GBPINR","JPYINR"]);
+const FOREX_USD = new Set(["EURUSD","GBPUSD"]);
+
+function fmtDisplay(sym, display, label) {
+  if (!display || display <= 0) return "—";
+  if (PTS_SYMS.has(sym))  return display.toLocaleString("en-IN",{minimumFractionDigits:2,maximumFractionDigits:2}) + " pts";
+  if (FOREX_INR.has(sym)) return "₹" + display.toFixed(4);
+  if (FOREX_USD.has(sym)) return "$" + display.toFixed(4);
+  const L = label || "";
+  if (display >= 1000) return "₹" + Math.round(display).toLocaleString("en-IN") + L;
+  return "₹" + display.toFixed(2) + L;
+}
+
+/* ════════════════════════════════════════════════════════════
+   WEBSOCKET — persistent connection with auto-reconnect
+   ════════════════════════════════════════════════════════════ */
+const HEADER_SYMS  = ["NIFTY50","BANKNIFTY","GOLD","CRUDEOIL","BTC","ETH","USDINR"];
+const SIDEBAR_SYMS = ["NIFTY50","BANKNIFTY","NIFTYIT","SENSEX","GOLD","SILVER","CRUDEOIL","BTC","ETH","USDINR"];
+let prev = {}, wsDelay = 1000, ws = null;
+
+function connectWS() {
+  const proto = location.protocol === "https:" ? "wss" : "ws";
+  ws = new WebSocket(`${proto}://${location.host}/ws/prices`);
+
+  ws.onopen = () => {
+    document.getElementById("ws-indicator").className = "ws-dot connected";
+    wsDelay = 1000;
+  };
+
+  ws.onmessage = (e) => {
+    const data = JSON.parse(e.data);
+    if (data.type !== "prices") return;
+    const { prices, usdinr } = data;
+
+    // Update header ticker
+    for (const sym of HEADER_SYMS) {
+      const info = prices[sym]; if (!info) continue;
+      const str  = fmtDisplay(sym, info.display, info.label);
+      const valEl= document.getElementById("tv-"+sym);
+      const chip = document.getElementById("tc-"+sym);
+      if (!valEl) continue;
+      if (valEl.textContent !== str) {
+        const dir = prev["h_"+sym] !== undefined ? (info.display > prev["h_"+sym] ? "up" : info.display < prev["h_"+sym] ? "dn" : "") : "";
+        valEl.textContent = str;
+        if (dir && chip) {
+          chip.classList.add("flash-"+dir);
+          valEl.style.color = dir==="up" ? "var(--green)" : "var(--red)";
+          setTimeout(() => { chip.classList.remove("flash-up","flash-dn"); valEl.style.color=""; }, 800);
+        }
+      }
+      prev["h_"+sym] = info.display;
+    }
+
+    // Update sidebar
+    for (const sym of SIDEBAR_SYMS) {
+      const info = prices[sym]; if (!info) continue;
+      const el   = document.getElementById("sb-"+sym); if (!el) continue;
+      const str  = fmtDisplay(sym, info.display, info.label);
+      if (el.textContent !== str) {
+        const dir = prev["s_"+sym] !== undefined ? (info.display > prev["s_"+sym] ? "up" : info.display < prev["s_"+sym] ? "dn" : "") : "";
+        el.className = "sb-val" + (dir ? " "+dir : "");
+        el.textContent = str;
+        prev["s_"+sym] = info.display;
+      }
+    }
+
+    // Dispatch for page-specific handlers
+    window.dispatchEvent(new CustomEvent("prices", { detail: { prices, usdinr } }));
+  };
+
+  ws.onclose = () => {
+    document.getElementById("ws-indicator").className = "ws-dot";
+    setTimeout(connectWS, wsDelay);
+    wsDelay = Math.min(wsDelay * 1.5, 5000);
+  };
+  ws.onerror = () => ws.close();
+}
+
+// Keep WebSocket alive with ping
+function pingWS() {
+  if (ws && ws.readyState === 1) ws.send("ping");
+}
+setInterval(pingWS, 5000);
+connectWS();
+
+/* ════════════════════════════════════════════════════════════
+   LIVE CLOCK (IST)
+   ════════════════════════════════════════════════════════════ */
+function tick() {
+  const ist = new Date(new Date().toLocaleString("en-US",{timeZone:"Asia/Kolkata"}));
+  const p   = n => String(n).padStart(2,"0");
+  const el  = document.getElementById("live-clock");
+  if (el) el.textContent = `${p(ist.getHours())}:${p(ist.getMinutes())}:${p(ist.getSeconds())} IST`;
+}
+setInterval(tick, 1000); tick();
+
+/* ════════════════════════════════════════════════════════════
+   TOAST SYSTEM
+   ════════════════════════════════════════════════════════════ */
+window.toast = (msg, type="inf", ms=4000) => {
+  const icons = {ok:"✅",err:"❌",inf:"ℹ️"};
+  const el = document.createElement("div");
+  el.className = `toast ${type}`;
+  el.innerHTML = `<span>${icons[type]||"•"}</span><span>${msg}</span>`;
+  document.getElementById("toasts").appendChild(el);
+  setTimeout(() => el.style.opacity="0", ms-300);
+  setTimeout(() => el.remove(), ms);
+};
+
+/* ════════════════════════════════════════════════════════════
+   API HELPER
+   ════════════════════════════════════════════════════════════ */
+window.api = async (url, method="GET", body=null) => {
+  const opts = {method, headers:{"Content-Type":"application/json"}};
+  if (body) opts.body = JSON.stringify(body);
+  try {
+    const r = await fetch(url, opts);
+    return await r.json();
+  } catch(e) {
+    return {ok:false,error:e.message};
+  }
+};
+</script>
+
+{% block extra_js %}{% endblock %}
+</body>
+</html>

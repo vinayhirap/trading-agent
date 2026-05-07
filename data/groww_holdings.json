@@ -1,0 +1,128 @@
+[
+  {
+    "symbol": "ADANI ENTERPRISES LIMITED",
+    "qty": 1,
+    "avg_price": 2435.8,
+    "current": null,
+    "invested": 2435.8,
+    "pnl": -601.6,
+    "source": "groww_csv"
+  },
+  {
+    "symbol": "ADANI POWER LTD",
+    "qty": 30,
+    "avg_price": 113.06,
+    "current": null,
+    "invested": 3391.8,
+    "pnl": 1407.3,
+    "source": "groww_csv"
+  },
+  {
+    "symbol": "AKASH INFRA-PROJECTS LTD",
+    "qty": 5,
+    "avg_price": 34.24,
+    "current": null,
+    "invested": 171.2,
+    "pnl": -48.35,
+    "source": "groww_csv"
+  },
+  {
+    "symbol": "AMBUJA CEMENTS LTD",
+    "qty": 2,
+    "avg_price": 508.0,
+    "current": null,
+    "invested": 1016.0,
+    "pnl": -179.1,
+    "source": "groww_csv"
+  },
+  {
+    "symbol": "ETERNAL LIMITED",
+    "qty": 1,
+    "avg_price": 53.4,
+    "current": null,
+    "invested": 53.4,
+    "pnl": 178.32,
+    "source": "groww_csv"
+  },
+  {
+    "symbol": "FSN E COMMERCE VENTURES",
+    "qty": 1,
+    "avg_price": 142.4,
+    "current": null,
+    "invested": 142.4,
+    "pnl": 103.58,
+    "source": "groww_csv"
+  },
+  {
+    "symbol": "GTL INFRA.LTD",
+    "qty": 200,
+    "avg_price": 1.64,
+    "current": null,
+    "invested": 328.0,
+    "pnl": -120.0,
+    "source": "groww_csv"
+  },
+  {
+    "symbol": "HSG & URBAN DEV CORPN LTD",
+    "qty": 10,
+    "avg_price": 209.63,
+    "current": null,
+    "invested": 2096.3,
+    "pnl": -416.5,
+    "source": "groww_csv"
+  },
+  {
+    "symbol": "ICICI PRUDENTIAL AMC LTD",
+    "qty": 6,
+    "avg_price": 2165.0,
+    "current": null,
+    "invested": 12990.0,
+    "pnl": 4075.8,
+    "source": "groww_csv"
+  },
+  {
+    "symbol": "IDFC FIRST BANK LIMITED",
+    "qty": 4,
+    "avg_price": 63.77,
+    "current": null,
+    "invested": 255.08,
+    "pnl": -14.2,
+    "source": "groww_csv"
+  },
+  {
+    "symbol": "INDIAN RAILWAY FIN CORP L",
+    "qty": 1,
+    "avg_price": 165.25,
+    "current": null,
+    "invested": 165.25,
+    "pnl": -73.41,
+    "source": "groww_csv"
+  },
+  {
+    "symbol": "OLA ELECTRIC MOBILITY LTD",
+    "qty": 5,
+    "avg_price": 93.72,
+    "current": null,
+    "invested": 468.6,
+    "pnl": -326.9,
+    "source": "groww_csv"
+  },
+  {
+    "symbol": "WIPRO",
+    "qty": 4,
+    "avg_price": 269.5,
+    "current": null,
+    "invested": 1078.0,
+    "pnl": -298.36,
+    "source": "groww_csv"
+  },
+  {
+    "symbol": "YES BANK LIMITED",
+    "qty": 40,
+    "avg_price": 19.18,
+    "current": null,
+    "invested": 767.2,
+    "pnl": -52.4,
+    "source": "groww_csv"
+  }
+]

@@ -1,0 +1,406 @@
+{% extends "base.html" %}
+{% block title %}System Health — AI Trading Agent{% endblock %}
+
+{% block extra_css %}
+.phase-bar{height:6px;border-radius:3px;background:var(--bg-4);overflow:hidden;margin:6px 0}
+.phase-fill{height:100%;border-radius:3px;transition:width .8s ease}
+.phase-item{display:flex;align-items:center;gap:8px;padding:5px 0;font-size:11px}
+.mod-row{display:flex;align-items:center;gap:10px;padding:5px 8px;border-bottom:1px solid var(--border);font-size:11px}
+.mod-row:last-child{border-bottom:none}
+.status-dot{width:8px;height:8px;border-radius:50%;flex-shrink:0}
+.dot-ok{background:var(--green)}
+.dot-fail{background:var(--red)}
+.pkg-chip{display:inline-flex;align-items:center;gap:5px;padding:3px 8px;border-radius:4px;font-size:10px;font-family:var(--mono-font);background:var(--bg-3);border:1px solid var(--border);margin:2px}
+.api-row{display:flex;align-items:center;justify-content:space-between;padding:7px 10px;background:var(--bg-3);border-radius:5px;font-size:11px;margin-bottom:4px}
+.score-ring{width:90px;height:90px;border-radius:50%;display:flex;align-items:center;justify-content:center;flex-direction:column;border:3px solid var(--border);flex-shrink:0}
+.grp-hd{font-size:10px;font-weight:700;letter-spacing:.08em;color:var(--txt-3);margin:10px 0 4px;text-transform:uppercase}
+{% endblock %}
+
+{% block content %}
+<div class="page-hd">
+  <div>
+    <div class="page-title">🏥 System Health</div>
+    <div class="page-sub">Module status · Models · APIs · Cache · Phase tracker · <span class="live"></span> Live diagnostics</div>
+  </div>
+  <div class="page-actions">
+    <button class="btn btn-ghost btn-sm" onclick="loadAll()">↻ Refresh</button>
+    <button class="btn btn-ghost btn-sm" onclick="loadModules()">Deep Scan →</button>
+    <span class="dim mono" id="sh-time" style="font-size:11px">—</span>
+  </div>
+</div>
+
+<!-- Score banner -->
+<div style="display:flex;align-items:center;gap:20px;padding:16px 20px;background:var(--bg-2);border:1px solid var(--border);border-radius:10px;margin-bottom:18px">
+  <div class="score-ring" id="score-ring">
+    <div style="font-family:var(--mono-font);font-size:22px;font-weight:700" id="score-pct">—</div>
+    <div style="font-size:8px;color:var(--txt-3);letter-spacing:.06em">HEALTH</div>
+  </div>
+  <div style="flex:1">
+    <div class="kpi-row" style="grid-template-columns:repeat(6,1fr);margin:0">
+      <div class="kpi"><div class="kpi-lbl">Modules OK</div><div class="kpi-val" id="k-mods">—</div></div>
+      <div class="kpi"><div class="kpi-lbl">Models Trained</div><div class="kpi-val" id="k-models">—</div></div>
+      <div class="kpi"><div class="kpi-lbl">APIs Configured</div><div class="kpi-val" id="k-apis">—</div></div>
+      <div class="kpi"><div class="kpi-lbl">AV Calls Today</div><div class="kpi-val" id="k-av">—</div></div>
+      <div class="kpi"><div class="kpi-lbl">Cache Files</div><div class="kpi-val" id="k-cache">—</div></div>
+      <div class="kpi"><div class="kpi-lbl">Python</div><div class="kpi-val" id="k-py" style="font-size:12px">—</div></div>
+    </div>
+  </div>
+</div>
+
+<!-- Tabs -->
+<div style="display:flex;gap:6px;margin-bottom:14px" id="sh-tabs">
+  {% for tab in ["Roadmap","Models","APIs","Packages","Cache","System"] %}
+  <button class="expiry-chip {{ 'active' if loop.first }}" onclick="switchTab('{{ tab }}')" id="shtab-{{ loop.index }}">{{ tab }}</button>
+  {% endfor %}
+</div>
+
+<!-- VIEW: ROADMAP -->
+<div id="shview-Roadmap">
+  <div id="phases-list" style="display:flex;flex-direction:column;gap:10px">
+    <div style="color:var(--txt-3);text-align:center;padding:30px"><div class="spin" style="display:inline-block"></div> Loading phases…</div>
+  </div>
+</div>
+
+<!-- VIEW: MODELS -->
+<div id="shview-Models" style="display:none">
+  <div class="g2">
+    <div class="card">
+      <div class="card-hd">Trained Models</div>
+      <div id="models-list">
+        <div style="color:var(--txt-3);font-size:11px">Loading…</div>
+      </div>
+    </div>
+    <div class="card">
+      <div class="card-hd">Walk-Forward Accuracy</div>
+      <div id="accuracy-list">
+        <div style="color:var(--txt-3);font-size:11px">Loading…</div>
+      </div>
+    </div>
+  </div>
+</div>
+
+<!-- VIEW: APIS -->
+<div id="shview-APIs" style="display:none">
+  <div class="g2">
+    <div class="card">
+      <div class="card-hd">API Keys Configured</div>
+      <div id="apis-list">
+        <div style="color:var(--txt-3);font-size:11px">Loading…</div>
+      </div>
+    </div>
+    <div class="card">
+      <div class="card-hd">Alpha Vantage Rate Limit</div>
+      <div id="av-status">
+        <div style="color:var(--txt-3);font-size:11px">Loading…</div>
+      </div>
+    </div>
+  </div>
+</div>
+
+<!-- VIEW: PACKAGES -->
+<div id="shview-Packages" style="display:none">
+  <div class="card">
+    <div class="card-hd">Key Package Versions</div>
+    <div id="packages-list" style="display:flex;flex-wrap:wrap;gap:4px;padding:4px">
+      <div style="color:var(--txt-3);font-size:11px">Loading…</div>
+    </div>
+  </div>
+  <div class="card" style="margin-top:14px">
+    <div class="card-hd">
+      Module Status — Quick Check
+      <span class="dim" id="mod-summary" style="font-size:10px"></span>
+    </div>
+    <div id="modules-quick">
+      <div style="color:var(--txt-3);font-size:11px">Loading…</div>
+    </div>
+  </div>
+  <div class="card" style="margin-top:14px">
+    <div class="card-hd">
+      Deep Module Scan
+      <button class="btn btn-ghost btn-sm" onclick="loadModules()">Scan All →</button>
+    </div>
+    <div id="modules-deep">
+      <div style="color:var(--txt-3);font-size:11px;text-align:center;padding:20px">Click "Scan All" to run deep module scan across all groups</div>
+    </div>
+  </div>
+</div>
+
+<!-- VIEW: CACHE -->
+<div id="shview-Cache" style="display:none">
+  <div class="g2">
+    <div class="card">
+      <div class="card-hd">Data Cache Status</div>
+      <div id="cache-detail">
+        <div style="color:var(--txt-3);font-size:11px">Loading…</div>
+      </div>
+    </div>
+    <div class="card">
+      <div class="card-hd">Cache Guide</div>
+      <div style="display:flex;flex-direction:column;gap:8px;font-size:11px">
+        {% for tip, desc in [
+          ("Parquet files","OHLCV data cached per symbol · auto-refreshed by DataManager"),
+          ("Stale data","Files older than 30 days may have gaps — force refresh recommended"),
+          ("Options cache","NSE options chain cached 5 min · auto-expires during market hours"),
+          ("FII/DII cache","NSE FII data cached 30 min · use manual entry as fallback"),
+        ] %}
+        <div style="padding:8px;background:var(--bg-3);border-radius:5px">
+          <div style="font-weight:600;color:var(--txt);margin-bottom:2px">{{ tip }}</div>
+          <div style="color:var(--txt-2)">{{ desc }}</div>
+        </div>
+        {% endfor %}
+      </div>
+    </div>
+  </div>
+</div>
+
+<!-- VIEW: SYSTEM -->
+<div id="shview-System" style="display:none">
+  <div class="g2">
+    <div class="card">
+      <div class="card-hd">System Info</div>
+      <div id="sysinfo-list">
+        <div style="color:var(--txt-3);font-size:11px">Loading…</div>
+      </div>
+    </div>
+    <div class="card">
+      <div class="card-hd">Quick Actions</div>
+      <div style="display:flex;flex-direction:column;gap:8px">
+        {% for action, cmd, desc in [
+          ("Train Index Model","python run_pipeline_v3.py --asset index --skip-tuning","Retrains ensemble model on latest index data"),
+          ("Train All Models","python run_pipeline_v3.py --skip-tuning","Full retrain across all 4 asset classes"),
+          ("Train HMM Regime","python run_pipeline_v3.py --regime-only","Retrains HMM regime detector"),
+          ("Fetch FII/DII","Visit NSE → Market Data → FII/DII Activity","Copy today's values into FII/DII Tracker page"),
+        ] %}
+        <div style="padding:10px 12px;background:var(--bg-3);border-radius:6px">
+          <div style="font-weight:600;font-size:12px;color:var(--txt);margin-bottom:3px">{{ action }}</div>
+          <div style="font-family:var(--mono-font);font-size:10px;color:var(--blue);margin-bottom:3px">{{ cmd }}</div>
+          <div style="font-size:10px;color:var(--txt-3)">{{ desc }}</div>
+        </div>
+        {% endfor %}
+      </div>
+    </div>
+  </div>
+</div>
+{% endblock %}
+
+{% block extra_js %}
+<script>
+const SH_TABS = ["Roadmap","Models","APIs","Packages","Cache","System"];
+let healthData = null;
+
+function switchTab(tab) {
+  SH_TABS.forEach((t, i) => {
+    document.getElementById("shview-" + t).style.display = t === tab ? "" : "none";
+    document.getElementById("shtab-" + (i+1)).className = "expiry-chip" + (t === tab ? " active" : "");
+  });
+}
+
+async function loadAll() {
+  const data = await api("/api/system-health");
+  document.getElementById("sh-time").textContent = "Updated " + new Date().toLocaleTimeString();
+  if (!data.ok) { toast("Health check failed: " + (data.error||"unknown"), "err"); return; }
+  healthData = data.health;
+  renderBanner(data.health);
+  renderRoadmap(data.health.phases);
+  renderModels(data.health);
+  renderAPIs(data.health);
+  renderPackages(data.health);
+  renderCache(data.health);
+  renderSysInfo(data.health);
+}
+
+function renderBanner(h) {
+  const pct = Math.round(h.modules_ok / h.modules_total * 100);
+  const col = pct >= 80 ? "var(--green)" : pct >= 60 ? "var(--gold)" : "var(--red)";
+  const ring = document.getElementById("score-ring");
+  ring.style.borderColor = col;
+  document.getElementById("score-pct").textContent = pct + "%";
+  document.getElementById("score-pct").style.color = col;
+  document.getElementById("k-mods").textContent   = h.modules_ok + "/" + h.modules_total;
+  document.getElementById("k-models").textContent = h.models_trained + "/" + h.models_total;
+  document.getElementById("k-apis").textContent   = h.apis_ok + "/" + h.apis_total;
+  document.getElementById("k-av").textContent     = h.av_calls + "/" + h.av_limit;
+  document.getElementById("k-cache").textContent  = h.cache?.files || "0";
+  document.getElementById("k-py").textContent     = h.sys_info?.python || "—";
+}
+
+function renderRoadmap(phases) {
+  const STATUS_CFG = {
+    complete:    { col: "var(--green)", label: "✅ COMPLETE",     bg: "rgba(0,232,122,.06)" },
+    in_progress: { col: "var(--gold)",  label: "🔄 IN PROGRESS",  bg: "rgba(255,170,0,.06)" },
+    planned:     { col: "var(--blue)",  label: "📅 PLANNED",      bg: "rgba(68,136,255,.06)" },
+  };
+  document.getElementById("phases-list").innerHTML = (phases||[]).map(p => {
+    const cfg = STATUS_CFG[p.status] || STATUS_CFG.planned;
+    const pct = p.total ? Math.round(p.done / p.total * 100) : 0;
+    return `<div style="background:${cfg.bg};border:1px solid var(--border);border-radius:8px;padding:14px 16px">
+      <div style="display:flex;align-items:center;justify-content:space-between;margin-bottom:8px">
+        <div style="font-size:13px;font-weight:700;color:var(--txt)">${p.name}</div>
+        <div style="display:flex;align-items:center;gap:10px">
+          <span style="font-size:9px;font-weight:700;color:${cfg.col}">${cfg.label}</span>
+          <span style="font-family:var(--mono-font);font-size:10px;color:var(--txt-3)">${p.done}/${p.total} files</span>
+        </div>
+      </div>
+      <div class="phase-bar"><div class="phase-fill" style="width:${pct}%;background:${cfg.col}"></div></div>
+      <div style="display:flex;flex-direction:column;gap:3px;margin-top:8px">
+        ${(p.items||[]).map(item => `
+          <div class="phase-item">
+            <span style="color:${item.exists ? "var(--green)" : "var(--txt-4, #444)"};font-size:13px">${item.exists ? "✅" : "⬜"}</span>
+            <span style="font-family:var(--mono-font);font-size:10px;color:var(--txt-3)">${item.path}</span>
+            <span style="font-size:10px;color:var(--txt-2)">${item.name}</span>
+          </div>`).join("")}
+      </div>
+    </div>`;
+  }).join("") || `<div style="color:var(--txt-3);text-align:center;padding:20px">No phase data</div>`;
+}
+
+function renderModels(h) {
+  const models = h.models || [];
+  document.getElementById("models-list").innerHTML = models.map(m => `
+    <div class="mod-row">
+      <div class="status-dot ${m.trained ? "dot-ok" : "dot-fail"}"></div>
+      <span style="font-weight:600;min-width:80px">${m.asset}</span>
+      <span class="${m.trained ? "up" : "dn"}" style="font-size:10px;min-width:80px">${m.trained ? "✅ Trained" : "❌ Missing"}</span>
+      <span class="dim" style="font-family:var(--mono-font);font-size:10px;flex:1">${m.size}</span>
+      <span class="dim" style="font-size:10px">${m.last_train}</span>
+    </div>`).join("") || `<div style="color:var(--txt-3);font-size:11px">No model data</div>`;
+
+  const acc = h.accuracy || [];
+  document.getElementById("accuracy-list").innerHTML = acc.length ? acc.map(a => `
+    <div class="mod-row">
+      <span style="font-weight:600;min-width:60px">${a.asset}</span>
+      <span class="up" style="font-family:var(--mono-font);font-size:13px;font-weight:700;min-width:60px">${a.accuracy}</span>
+      <span style="font-size:10px;color:${(a.vs_baseline||"").includes("+") ? "var(--green)" : "var(--red)"}">${a.vs_baseline} vs baseline</span>
+      <span class="dim" style="font-size:10px;margin-left:auto">${a.folds} folds</span>
+    </div>`).join("") :
+    `<div style="color:var(--txt-3);font-size:11px;padding:10px">No accuracy data. Run: <span style="font-family:var(--mono-font)">python run_pipeline_v3.py --skip-tuning</span></div>`;
+}
+
+function renderAPIs(h) {
+  const apis = h.apis || {};
+  const API_LABELS = {
+    anthropic: "Anthropic Claude", news_api: "NewsAPI", gnews: "GNews",
+    coinswitch: "CoinSwitch", telegram: "Telegram Bot",
+    angel: "Angel One SmartAPI", alpha_vantage: "Alpha Vantage",
+  };
+  const API_USE = {
+    anthropic: "AI analysis, nerve center", news_api: "News feed sentiment",
+    gnews: "Latest news service", coinswitch: "Crypto portfolio",
+    telegram: "Signal alerts", angel: "Live trading execution",
+    alpha_vantage: "Fundamentals data",
+  };
+  document.getElementById("apis-list").innerHTML = Object.entries(apis).map(([k, v]) => `
+    <div class="api-row">
+      <div>
+        <div style="font-weight:600">${API_LABELS[k] || k}</div>
+        <div style="font-size:10px;color:var(--txt-3)">${API_USE[k] || ""}</div>
+      </div>
+      <span class="${v ? "up" : "dn"}" style="font-size:11px;font-weight:700">${v ? "✅ OK" : "❌ Missing"}</span>
+    </div>`).join("") || `<div style="color:var(--txt-3);font-size:11px">No API data</div>`;
+
+  const av = h.av_rate || {};
+  const avPct = av.daily_limit ? Math.round(av.calls_today / av.daily_limit * 100) : 0;
+  const avCol = avPct > 80 ? "var(--red)" : avPct > 60 ? "var(--gold)" : "var(--green)";
+  document.getElementById("av-status").innerHTML = `
+    <div style="margin-bottom:12px">
+      <div style="display:flex;justify-content:space-between;font-size:10px;color:var(--txt-3);margin-bottom:4px">
+        <span>Calls used today</span><span style="color:${avCol}">${av.calls_today||0} / ${av.daily_limit||25}</span>
+      </div>
+      <div style="height:8px;background:var(--bg-4);border-radius:4px;overflow:hidden">
+        <div style="width:${avPct}%;height:100%;background:${avCol};border-radius:4px;transition:width .6s"></div>
+      </div>
+    </div>
+    <div style="font-size:11px;color:var(--txt-2)">${av.calls_remaining||25} calls remaining today</div>
+    <div style="font-size:10px;color:var(--txt-3);margin-top:6px">Free tier: 25 calls/day · Premium: 500 calls/day · Used for fundamentals fetching</div>`;
+}
+
+function renderPackages(h) {
+  const pkgs = h.packages || [];
+  document.getElementById("packages-list").innerHTML = pkgs.map(p => `
+    <div class="pkg-chip" style="border-color:${p.ok ? "var(--border)" : "var(--red)"}">
+      <div class="status-dot ${p.ok ? "dot-ok" : "dot-fail"}"></div>
+      <span style="color:var(--txt)">${p.name}</span>
+      <span style="color:${p.ok ? "var(--txt-3)" : "var(--red)"}">v${p.version}</span>
+    </div>`).join("") || `<div style="color:var(--txt-3);font-size:11px">No package data</div>`;
+
+  // Quick module check
+  const mods = h.modules_ok !== undefined ? `${h.modules_ok}/${h.modules_total} loaded` : "";
+  document.getElementById("mod-summary").textContent = mods;
+  document.getElementById("modules-quick").innerHTML = `
+    <div style="padding:10px;background:var(--bg-3);border-radius:6px;font-size:11px;color:var(--txt-2)">
+      Quick check: <span class="${h.modules_ok === h.modules_total ? "up" : "dn"}" style="font-weight:700">${h.modules_ok}/${h.modules_total}</span> core modules loaded.
+      Click "Scan All" above for full diagnostics including error messages.
+    </div>`;
+}
+
+function renderCache(h) {
+  const c = h.cache || {};
+  document.getElementById("cache-detail").innerHTML = `
+    <div class="kpi-row" style="grid-template-columns:repeat(2,1fr);margin-bottom:14px">
+      <div class="kpi"><div class="kpi-lbl">Parquet Files</div><div class="kpi-val">${c.files||0}</div></div>
+      <div class="kpi"><div class="kpi-lbl">Total Size</div><div class="kpi-val">${c.total_mb||0} MB</div></div>
+      <div class="kpi"><div class="kpi-lbl">Oldest Data</div><div class="kpi-val" style="font-size:12px">${c.oldest||"—"}</div></div>
+      <div class="kpi"><div class="kpi-lbl">Newest Data</div><div class="kpi-val" style="font-size:12px">${c.newest||"—"}</div></div>
+    </div>
+    <div style="font-size:10px;color:var(--txt-3);padding:8px;background:var(--bg-3);border-radius:5px">
+      Cache location: <span style="font-family:var(--mono-font)">data/processed/*.parquet</span><br>
+      Auto-managed by DataManager. Stale files (&gt;30 days) can be cleared safely.
+    </div>`;
+}
+
+function renderSysInfo(h) {
+  const s = h.sys_info || {};
+  document.getElementById("sysinfo-list").innerHTML = `
+    <div style="display:flex;flex-direction:column;gap:6px">
+      ${[
+        ["Python Version", s.python || "—"],
+        ["Platform",       s.platform || "—"],
+        ["Project Root",   s.root || "—"],
+        ["RAM",            s.ram || "—"],
+      ].map(([k,v]) => `
+        <div class="api-row">
+          <span style="font-weight:600">${k}</span>
+          <span style="font-family:var(--mono-font);font-size:11px;color:var(--txt-2)">${v}</span>
+        </div>`).join("")}
+    </div>`;
+}
+
+async function loadModules() {
+  document.getElementById("modules-deep").innerHTML =
+    `<div style="text-align:center;padding:20px;color:var(--txt-3)"><div class="spin" style="display:inline-block"></div> Scanning all modules…</div>`;
+
+  // Switch to Packages tab to show result
+  switchTab("Packages");
+
+  const data = await api("/api/system-health/modules");
+  if (!data.ok) {
+    document.getElementById("modules-deep").innerHTML =
+      `<div style="color:var(--red);font-size:11px;padding:10px">Scan failed: ${data.error||"unknown"}</div>`;
+    return;
+  }
+
+  document.getElementById("mod-summary").textContent =
+    `${data.summary.ok}/${data.summary.total} loaded`;
+
+  document.getElementById("modules-deep").innerHTML = Object.entries(data.groups||{}).map(([grp, mods]) => {
+    const ok = mods.filter(m => m.ok).length;
+    return `
+      <div style="margin-bottom:10px">
+        <div class="grp-hd">${grp} <span style="color:${ok===mods.length?"var(--green)":"var(--gold)"}">(${ok}/${mods.length})</span></div>
+        ${mods.map(m => `
+          <div class="mod-row">
+            <div class="status-dot ${m.ok ? "dot-ok" : "dot-fail"}"></div>
+            <span style="font-weight:600;min-width:150px">${m.name}</span>
+            <span class="${m.ok ? "up" : "dn"}" style="font-size:10px;min-width:70px">${m.ok ? "✅ OK" : "❌ Fail"}</span>
+            <span style="font-family:var(--mono-font);font-size:10px;color:var(--txt-3);flex:1">${m.path}</span>
+            ${!m.ok ? `<span style="font-size:10px;color:var(--red);max-width:200px;overflow:hidden;text-overflow:ellipsis">${m.error}</span>` : ""}
+          </div>`).join("")}
+      </div>`;
+  }).join("") || `<div style="color:var(--txt-3);font-size:11px">No module data</div>`;
+}
+
+// Auto-load
+loadAll();
+setInterval(loadAll, 120000);
+</script>
+{% endblock %}

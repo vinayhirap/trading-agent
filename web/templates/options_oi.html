@@ -1,0 +1,392 @@
+{% extends "base.html" %}
+{% block title %}Options OI — AI Trading Agent{% endblock %}
+
+{% block extra_css %}
+.chain-row-atm{background:rgba(255,170,0,.08)!important;font-weight:700}
+.chain-row-atm td{color:var(--gold)!important}
+.pcr-gauge{height:12px;border-radius:6px;background:var(--bg-4);overflow:hidden;margin:8px 0;position:relative}
+.pcr-fill{height:100%;border-radius:6px;transition:width .8s}
+.oi-bar{display:inline-block;height:10px;border-radius:2px;vertical-align:middle;transition:width .4s}
+.expiry-chip{padding:4px 10px;border-radius:4px;font-size:9px;font-weight:700;letter-spacing:.06em;background:var(--bg-4);color:var(--txt-2);cursor:pointer;border:1px solid var(--border);transition:all .15s}
+.expiry-chip.active{background:var(--blue-dim);color:var(--blue);border-color:var(--blue)}
+{% endblock %}
+
+{% block content %}
+<div class="page-hd">
+  <div>
+    <div class="page-title">📊 Options OI</div>
+    <div class="page-sub">NSE option chain · PCR · Max Pain · OI buildup · Bank Nifty weekly edge</div>
+  </div>
+  <div class="page-actions">
+    <select class="sel" id="oi-sym" onchange="loadChain()">
+      <option value="NIFTY50">NIFTY</option>
+      <option value="BANKNIFTY">BANK NIFTY</option>
+    </select>
+    <button class="btn btn-ghost btn-sm" onclick="loadChain()">↻ Refresh</button>
+    <span class="dim mono" id="oi-time" style="font-size:11px">—</span>
+  </div>
+</div>
+
+<!-- Key metrics -->
+<div class="kpi-row" style="grid-template-columns:repeat(7,1fr);margin-bottom:18px">
+  <div class="kpi"><div class="kpi-lbl">Spot Price</div><div class="kpi-val" id="k-spot">—</div></div>
+  <div class="kpi"><div class="kpi-lbl">ATM Strike</div><div class="kpi-val" id="k-atm">—</div></div>
+  <div class="kpi"><div class="kpi-lbl">PCR (OI)</div><div class="kpi-val" id="k-pcr">—</div></div>
+  <div class="kpi"><div class="kpi-lbl">PCR Signal</div><div class="kpi-val" id="k-pcr-sig" style="font-size:12px">—</div></div>
+  <div class="kpi"><div class="kpi-lbl">Max Pain</div><div class="kpi-val" id="k-maxpain">—</div></div>
+  <div class="kpi"><div class="kpi-lbl">DTE</div><div class="kpi-val" id="k-dte">—</div></div>
+  <div class="kpi"><div class="kpi-lbl">IV Rank</div><div class="kpi-val" id="k-iv">—</div></div>
+</div>
+
+<!-- PCR gauge + interpretation -->
+<div class="card" style="margin-bottom:14px">
+  <div class="card-hd">PCR Gauge — Put-Call Ratio</div>
+  <div class="g2" style="align-items:center">
+    <div>
+      <div style="display:flex;justify-content:space-between;font-size:9px;color:var(--txt-3);margin-bottom:3px">
+        <span>0 (Extreme Bearish)</span><span>0.7 (Neutral)</span><span>1.0</span><span>1.5+ (Extreme Bullish)</span>
+      </div>
+      <div class="pcr-gauge">
+        <div class="pcr-fill" id="pcr-fill" style="width:50%;background:var(--blue)"></div>
+      </div>
+      <div style="font-size:10px;color:var(--txt-3);margin-top:4px">
+        Low PCR = call writing dominant = bearish market makers · High PCR = put writing = bullish support
+      </div>
+    </div>
+    <div id="pcr-interpretation" style="padding:12px;background:var(--bg-3);border-radius:6px;font-size:11px;color:var(--txt-2)">
+      Loading PCR interpretation…
+    </div>
+  </div>
+</div>
+
+<!-- Tabs -->
+<div style="display:flex;gap:6px;margin-bottom:14px" id="oi-tabs">
+  {% for tab in ["OI Chart","OI Changes","Option Chain","Max Pain","IV Smile"] %}
+  <button class="expiry-chip {{ 'active' if loop.first }}" onclick="switchTab('{{ tab }}')" id="tab-{{ loop.index }}">{{ tab }}</button>
+  {% endfor %}
+</div>
+
+<!-- OI Chart view -->
+<div id="view-OI Chart">
+  <div class="card">
+    <div class="card-hd">Open Interest by Strike — Calls ↑ vs Puts ↓</div>
+    <div id="oi-chart" style="overflow-x:auto">
+      <div style="color:var(--txt-3);text-align:center;padding:40px"><div class="spin" style="display:inline-block"></div> Loading OI…</div>
+    </div>
+  </div>
+</div>
+
+<!-- OI Changes view -->
+<div id="view-OI Changes" style="display:none">
+  <div class="card">
+    <div class="card-hd">OI Change (Today vs Yesterday)</div>
+    <div id="oi-change-chart" style="overflow-x:auto">
+      <div style="color:var(--txt-3);text-align:center;padding:24px">Loading…</div>
+    </div>
+  </div>
+</div>
+
+<!-- Chain view -->
+<div id="view-Option Chain" style="display:none">
+  <div class="card">
+    <div class="card-hd">
+      Full Option Chain
+      <span class="dim" id="chain-expiry" style="font-size:10px"></span>
+    </div>
+    <div class="tbl-wrap">
+      <table id="chain-table">
+        <thead>
+          <tr>
+            <th>Call OI</th><th>Call Chg OI</th><th>Call Vol</th><th>Call IV</th><th>Call LTP</th>
+            <th style="text-align:center;background:var(--bg-3)">STRIKE</th>
+            <th>Put LTP</th><th>Put IV</th><th>Put Vol</th><th>Put Chg OI</th><th>Put OI</th>
+          </tr>
+        </thead>
+        <tbody id="chain-tbody">
+          <tr><td colspan="11" style="text-align:center;padding:24px;color:var(--txt-3)">Loading chain…</td></tr>
+        </tbody>
+      </table>
+    </div>
+  </div>
+</div>
+
+<!-- Max Pain view -->
+<div id="view-Max Pain" style="display:none">
+  <div class="g2">
+    <div class="card">
+      <div class="card-hd">Max Pain Analysis</div>
+      <div id="maxpain-content">
+        <div style="color:var(--txt-3);font-size:12px">Loading…</div>
+      </div>
+    </div>
+    <div class="card">
+      <div class="card-hd">Max Pain Guide</div>
+      <div style="display:flex;flex-direction:column;gap:8px;font-size:11px">
+        {% for tip in [
+          ("What is Max Pain?","The strike price where option sellers lose the least — spot tends to gravitate here on expiry day","📐"),
+          ("How to use","If spot is 200pt above max pain, expect selling pressure from market makers","🎯"),
+          ("Weekly expiry edge","Bank Nifty weekly: 40% of weeks close within 0.5% of max pain strike","📊"),
+          ("Day-of-expiry","Max pain magnetic pull is strongest in final 2 hours before 3:30 PM","⏰"),
+        ] %}
+        <div style="padding:8px;background:var(--bg-3);border-radius:5px">
+          <div style="display:flex;gap:8px;align-items:flex-start">
+            <span>{{ tip[2] }}</span>
+            <div>
+              <div style="font-weight:600;color:var(--txt);margin-bottom:2px">{{ tip[0] }}</div>
+              <div style="color:var(--txt-2)">{{ tip[1] }}</div>
+            </div>
+          </div>
+        </div>
+        {% endfor %}
+      </div>
+    </div>
+  </div>
+</div>
+
+<!-- IV Smile view -->
+<div id="view-IV Smile" style="display:none">
+  <div class="card">
+    <div class="card-hd">IV Smile — Implied Volatility by Strike</div>
+    <div id="iv-chart" style="overflow-x:auto">
+      <div style="color:var(--txt-3);text-align:center;padding:24px">Loading IV data…</div>
+    </div>
+  </div>
+</div>
+{% endblock %}
+
+{% block extra_js %}
+<script>
+let chainData = null;
+let activeTab = "OI Chart";
+
+function switchTab(tab) {
+  activeTab = tab;
+  const tabs = ["OI Chart","OI Changes","Option Chain","Max Pain","IV Smile"];
+  tabs.forEach((t, i) => {
+    document.getElementById("view-" + t).style.display = t === tab ? "" : "none";
+    document.getElementById("tab-" + (i+1)).className = "expiry-chip" + (t === tab ? " active" : "");
+  });
+}
+
+async function loadChain() {
+  const sym = document.getElementById("oi-sym").value;
+  document.getElementById("oi-time").textContent = "Updated " + new Date().toLocaleTimeString();
+
+  const data = await api(`/api/options-oi?symbol=${sym}`);
+  if (!data.ok) {
+    toast("Options data unavailable — NSE API required", "inf");
+    renderFallback(sym);
+    return;
+  }
+
+  chainData = data.chain;
+  renderAll(data.chain);
+}
+
+function renderAll(chain) {
+  if (!chain) return;
+
+  // KPIs
+  document.getElementById("k-spot").textContent   = chain.spot ? `₹${chain.spot.toLocaleString("en-IN",{maximumFractionDigits:0})}` : "—";
+  document.getElementById("k-atm").textContent    = chain.atm_strike ? `₹${chain.atm_strike.toLocaleString("en-IN",{maximumFractionDigits:0})}` : "—";
+  document.getElementById("k-maxpain").textContent= chain.max_pain ? `₹${chain.max_pain.toLocaleString("en-IN",{maximumFractionDigits:0})}` : "—";
+  document.getElementById("k-dte").textContent    = chain.dte !== undefined ? chain.dte + "d" : "—";
+  document.getElementById("k-iv").textContent     = chain.iv_rank ? chain.iv_rank.toFixed(1) + "%" : "—";
+  document.getElementById("chain-expiry").textContent = chain.expiry ? "Expiry: " + chain.expiry : "";
+
+  // PCR
+  const pcr = chain.pcr || 0;
+  document.getElementById("k-pcr").textContent = pcr.toFixed(2);
+  const pcrSig = pcr > 1.3 ? "BEARISH" : pcr > 0.9 ? "NEUTRAL" : "BULLISH";
+  const pcrEl = document.getElementById("k-pcr-sig");
+  pcrEl.textContent = pcrSig;
+  pcrEl.className   = "kpi-val " + (pcrSig==="BULLISH"?"up":pcrSig==="BEARISH"?"dn":"");
+
+  // PCR fill (0–1.5 range → 0–100%)
+  const pcrPct = Math.min(100, (pcr / 1.5) * 100);
+  const pcrFill = document.getElementById("pcr-fill");
+  pcrFill.style.width = pcrPct + "%";
+  pcrFill.style.background = pcr > 1.2 ? "var(--red)" : pcr > 0.9 ? "var(--blue)" : pcr > 0.6 ? "var(--gold)" : "var(--green)";
+
+  // PCR interpretation
+  let pcrInterpret = "";
+  if (pcr > 1.3)      pcrInterpret = `<strong style="color:var(--red)">PCR ${pcr.toFixed(2)} — Heavy put writing.</strong> Market makers expect strong support. Contrarian signal: <span class="up">BULLISH</span>. Puts being sold aggressively = writers expect market to stay above key strikes.`;
+  else if (pcr > 1.0) pcrInterpret = `<strong style="color:var(--gold)">PCR ${pcr.toFixed(2)} — Moderate put writing.</strong> Mild bullish bias. Market expects support to hold.`;
+  else if (pcr > 0.7) pcrInterpret = `<strong>PCR ${pcr.toFixed(2)} — Balanced.</strong> No extreme sentiment. Follow price action.`;
+  else if (pcr > 0.5) pcrInterpret = `<strong style="color:var(--gold)">PCR ${pcr.toFixed(2)} — Moderate call writing.</strong> Mild bearish bias. Market expects resistance overhead.`;
+  else                pcrInterpret = `<strong style="color:var(--green)">PCR ${pcr.toFixed(2)} — Heavy call writing.</strong> Market makers expect resistance. Contrarian signal: <span class="dn">BEARISH</span>.`;
+  document.getElementById("pcr-interpretation").innerHTML = pcrInterpret;
+
+  renderOIChart(chain);
+  renderOIChanges(chain);
+  renderChainTable(chain);
+  renderMaxPain(chain);
+  renderIVSmile(chain);
+}
+
+function barHtml(val, maxVal, color) {
+  const pct = Math.min(100, (val / Math.max(1, maxVal)) * 80);
+  return `<div class="oi-bar" style="width:${pct}px;background:${color}"></div>`;
+}
+
+function renderOIChart(chain) {
+  const strikes = chain.strikes || [];
+  if (!strikes.length) { document.getElementById("oi-chart").innerHTML = `<div style="color:var(--txt-3);text-align:center;padding:24px">No OI data</div>`; return; }
+  const maxCallOI = Math.max(...strikes.map(s => s.call_oi||0), 1);
+  const maxPutOI  = Math.max(...strikes.map(s => s.put_oi||0), 1);
+  const maxOI     = Math.max(maxCallOI, maxPutOI);
+  const atm       = chain.atm_strike;
+
+  document.getElementById("oi-chart").innerHTML = `
+    <div style="min-width:600px">
+      <div style="display:flex;gap:16px;margin-bottom:10px;font-size:10px">
+        <span style="color:var(--red)">■ Call OI (resistance)</span>
+        <span style="color:var(--green)">■ Put OI (support)</span>
+        <span style="color:var(--gold)">◆ ATM Strike</span>
+        ${chain.max_pain ? `<span style="color:var(--blue)">▲ Max Pain ₹${chain.max_pain.toLocaleString("en-IN",{maximumFractionDigits:0})}</span>` : ""}
+      </div>
+      ${strikes.map(s => {
+        const isATM = s.strike === atm;
+        const isMP  = chain.max_pain && Math.abs(s.strike - chain.max_pain) < 50;
+        const callW = Math.round((s.call_oi||0) / maxOI * 200);
+        const putW  = Math.round((s.put_oi||0)  / maxOI * 200);
+        return `<div style="display:flex;align-items:center;gap:8px;padding:3px 0;${isATM?"background:rgba(255,170,0,.07);border-radius:4px":""}">
+          <div style="width:200px;display:flex;justify-content:flex-end">
+            <div style="height:16px;width:${callW}px;background:${isATM?"var(--gold)":"rgba(255,51,102,.6)"};border-radius:2px 0 0 2px"></div>
+          </div>
+          <div style="width:80px;text-align:center;font-family:var(--mono-font);font-size:10px;font-weight:${isATM?700:400};color:${isATM?"var(--gold)":"var(--txt-2)"}">
+            ${isMP?"▲ ":""}₹${s.strike.toLocaleString("en-IN")}${isATM?" ◄":""}
+          </div>
+          <div style="width:200px;display:flex;justify-content:flex-start">
+            <div style="height:16px;width:${putW}px;background:${isATM?"var(--gold)":"rgba(0,232,122,.5)"};border-radius:0 2px 2px 0"></div>
+          </div>
+          <div style="font-size:9px;color:var(--txt-3);width:100px">${s.call_oi ? (s.call_oi/100000).toFixed(2)+"L" : ""} / ${s.put_oi ? (s.put_oi/100000).toFixed(2)+"L" : ""}</div>
+        </div>`;
+      }).join("")}
+    </div>`;
+}
+
+function renderOIChanges(chain) {
+  const strikes = chain.strikes || [];
+  const maxChg = Math.max(...strikes.map(s => Math.max(Math.abs(s.call_oi_chg||0), Math.abs(s.put_oi_chg||0))), 1);
+  document.getElementById("oi-change-chart").innerHTML = strikes.length ?
+    `<div style="min-width:500px">
+      <div style="display:flex;gap:16px;margin-bottom:10px;font-size:10px">
+        <span style="color:var(--red)">■ Call OI built (new shorts, resistance)</span>
+        <span style="color:var(--green)">■ Put OI built (new shorts, support)</span>
+      </div>
+      ${strikes.map(s => {
+        const cc = s.call_oi_chg||0, pc = s.put_oi_chg||0;
+        const cW = Math.round(Math.abs(cc)/maxChg*150), pW = Math.round(Math.abs(pc)/maxChg*150);
+        const isATM = s.strike === chain.atm_strike;
+        return `<div style="display:flex;align-items:center;gap:8px;padding:3px 0">
+          <div style="width:150px;display:flex;justify-content:flex-end">
+            <div style="height:12px;width:${cW}px;background:${cc>0?"rgba(255,51,102,.7)":"rgba(255,51,102,.2)"};border-radius:2px 0 0 2px"></div>
+          </div>
+          <div style="width:80px;text-align:center;font-size:10px;font-family:var(--mono-font);color:${isATM?"var(--gold)":"var(--txt-2)"}">₹${s.strike.toLocaleString("en-IN")}</div>
+          <div style="width:150px">
+            <div style="height:12px;width:${pW}px;background:${pc>0?"rgba(0,232,122,.7)":"rgba(0,232,122,.2)"};border-radius:0 2px 2px 0"></div>
+          </div>
+          <div style="font-size:9px;color:var(--txt-3)">${cc>0?"+":""}${(cc/1000).toFixed(0)}K / ${pc>0?"+":""}${(pc/1000).toFixed(0)}K</div>
+        </div>`;
+      }).join("")}
+    </div>` : `<div style="color:var(--txt-3);text-align:center;padding:24px">No change data</div>`;
+}
+
+function renderChainTable(chain) {
+  const strikes = chain.strikes || [];
+  const atm     = chain.atm_strike;
+  document.getElementById("chain-tbody").innerHTML = strikes.map(s => {
+    const isATM = s.strike === atm;
+    return `<tr class="${isATM?"chain-row-atm":""}">
+      <td>${s.call_oi ? (s.call_oi/100000).toFixed(2)+"L" : "—"}</td>
+      <td class="${(s.call_oi_chg||0)>0?"up":"dn"}">${s.call_oi_chg ? (s.call_oi_chg>0?"+":"")+(s.call_oi_chg/1000).toFixed(0)+"K" : "—"}</td>
+      <td>${s.call_vol ? (s.call_vol/1000).toFixed(0)+"K" : "—"}</td>
+      <td class="dim">${s.call_iv ? s.call_iv.toFixed(1)+"%" : "—"}</td>
+      <td class="dn">${s.call_ltp ? "₹"+s.call_ltp.toFixed(2) : "—"}</td>
+      <td style="text-align:center;background:var(--bg-3);font-weight:700;color:${isATM?"var(--gold)":"var(--txt)"};font-family:var(--mono-font)">
+        ₹${s.strike.toLocaleString("en-IN")}${isATM?" ◄ATM":""}
+      </td>
+      <td class="up">${s.put_ltp ? "₹"+s.put_ltp.toFixed(2) : "—"}</td>
+      <td class="dim">${s.put_iv ? s.put_iv.toFixed(1)+"%" : "—"}</td>
+      <td>${s.put_vol ? (s.put_vol/1000).toFixed(0)+"K" : "—"}</td>
+      <td class="${(s.put_oi_chg||0)>0?"up":"dn"}">${s.put_oi_chg ? (s.put_oi_chg>0?"+":"")+(s.put_oi_chg/1000).toFixed(0)+"K" : "—"}</td>
+      <td>${s.put_oi ? (s.put_oi/100000).toFixed(2)+"L" : "—"}</td>
+    </tr>`;
+  }).join("") || `<tr><td colspan="11" style="text-align:center;padding:20px;color:var(--txt-3)">No chain data</td></tr>`;
+}
+
+function renderMaxPain(chain) {
+  const mp  = chain.max_pain;
+  const spot = chain.spot;
+  const dte  = chain.dte;
+  if (!mp) { document.getElementById("maxpain-content").innerHTML = `<div style="color:var(--txt-3);font-size:11px">Max pain not available</div>`; return; }
+
+  const diff = spot - mp;
+  const pct  = (diff / mp * 100).toFixed(2);
+  const outlook = Math.abs(diff) < 50 ? "Spot is near max pain — expect choppy, sideways action near expiry" :
+                  diff > 0 ? `Spot ₹${Math.abs(diff).toFixed(0)} above max pain — selling pressure expected toward ₹${mp.toLocaleString("en-IN",{maximumFractionDigits:0})}` :
+                             `Spot ₹${Math.abs(diff).toFixed(0)} below max pain — buying pressure expected toward ₹${mp.toLocaleString("en-IN",{maximumFractionDigits:0})}`;
+
+  document.getElementById("maxpain-content").innerHTML = `
+    <div style="display:flex;gap:20px;margin-bottom:16px">
+      <div><div class="kpi-lbl">Max Pain Strike</div><div style="font-family:var(--mono-font);font-size:24px;font-weight:700;color:var(--gold)">₹${mp.toLocaleString("en-IN",{maximumFractionDigits:0})}</div></div>
+      <div><div class="kpi-lbl">Spot vs Pain</div><div style="font-family:var(--mono-font);font-size:18px;font-weight:600;color:${diff>=0?"var(--red)":"var(--green)"}">${diff>=0?"+":""}${diff.toFixed(0)} (${diff>=0?"+":""}${pct}%)</div></div>
+      <div><div class="kpi-lbl">DTE</div><div style="font-family:var(--mono-font);font-size:18px;font-weight:600">${dte||"—"}d</div></div>
+    </div>
+    <div style="padding:10px 12px;background:var(--bg-3);border-radius:6px;font-size:11px;color:var(--txt-2);margin-bottom:12px;border-left:2px solid var(--gold)">
+      📐 ${outlook}
+    </div>
+    <div style="font-size:10px;color:var(--txt-3)">
+      Strength: ${dte && dte <= 2 ? "🔴 HIGH — Within 2 days of expiry, max pain gravity is strongest" : dte && dte <= 5 ? "🟡 MODERATE — Approaching expiry, increasing influence" : "⚪ LOW — Still far from expiry, price discovery dominant"}
+    </div>`;
+}
+
+function renderIVSmile(chain) {
+  const strikes = chain.strikes || [];
+  const atm     = chain.atm_strike;
+  const withIV  = strikes.filter(s => s.call_iv || s.put_iv);
+  if (!withIV.length) {
+    document.getElementById("iv-chart").innerHTML = `<div style="color:var(--txt-3);text-align:center;padding:24px">IV data not available</div>`; return;
+  }
+  const maxIV = Math.max(...withIV.map(s => Math.max(s.call_iv||0, s.put_iv||0)), 1);
+  document.getElementById("iv-chart").innerHTML = `
+    <div style="min-width:500px">
+      <div style="display:flex;gap:16px;margin-bottom:10px;font-size:10px">
+        <span style="color:var(--red)">— Call IV</span>
+        <span style="color:var(--green)">— Put IV</span>
+      </div>
+      ${withIV.map(s => {
+        const civ = s.call_iv||0, piv = s.put_iv||0;
+        const cH  = Math.round(civ/maxIV*80), pH = Math.round(piv/maxIV*80);
+        const isATM = s.strike === atm;
+        return `<div style="display:flex;align-items:flex-end;gap:4px;padding:2px 0">
+          <div style="width:80px;text-align:right;font-size:9px;font-family:var(--mono-font);color:${isATM?"var(--gold)":"var(--txt-3)"}">₹${s.strike.toLocaleString("en-IN")}</div>
+          <div style="display:flex;align-items:flex-end;gap:2px">
+            ${civ ? `<div title="Call IV ${civ.toFixed(1)}%" style="width:12px;height:${cH}px;background:rgba(255,51,102,.7);border-radius:2px 2px 0 0"></div>` : ""}
+            ${piv ? `<div title="Put IV ${piv.toFixed(1)}%" style="width:12px;height:${pH}px;background:rgba(0,232,122,.6);border-radius:2px 2px 0 0"></div>` : ""}
+          </div>
+          <div style="font-size:9px;color:var(--txt-3)">${civ?civ.toFixed(1)+"%":""} / ${piv?piv.toFixed(1)+"%":""}</div>
+        </div>`;
+      }).join("")}
+    </div>`;
+}
+
+function renderFallback(sym) {
+  // Fallback when API unavailable — show guide + placeholder
+  document.getElementById("k-spot").textContent = "NSE only";
+  document.getElementById("k-pcr").textContent  = "N/A";
+  document.getElementById("pcr-interpretation").innerHTML =
+    `<div style="color:var(--txt-3);font-size:11px">Options OI requires NSE market hours (9:15 AM – 3:30 PM IST) and Angel One API connection. Outside market hours, use this page as reference for PCR interpretation.</div>`;
+  document.getElementById("oi-chart").innerHTML =
+    `<div style="color:var(--txt-3);text-align:center;padding:40px">
+      <div style="font-size:24px;margin-bottom:8px">📡</div>
+      <div style="font-size:13px;margin-bottom:4px">NSE Options data requires market hours + Angel One API</div>
+      <div style="font-size:11px">9:15 AM – 3:30 PM IST · Monday–Friday · Non-holidays</div>
+    </div>`;
+}
+
+loadChain();
+setInterval(loadChain, 60000);
+</script>
+{% endblock %}

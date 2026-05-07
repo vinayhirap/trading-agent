@@ -1,0 +1,157 @@
+{
+  "alerts": [
+    {
+      "id": "babc2f93",
+      "symbol": "CRUDEOIL",
+      "alert_type": "SIGNAL_CHANGE",
+      "threshold": 0.0,
+      "label": "Crude Signal",
+      "created_at": "2026-04-01T17:36:30.528098+00:00",
+      "status": "TRIGGERED",
+      "notify_email": true,
+      "notify_ui": true,
+      "triggered_at": "2026-04-01T17:47:31.887342+00:00",
+      "triggered_val": 99.19999694824219,
+      "message": "CRUDEOIL signal changed to BUY at \u20b999.20",
+      "watch_signals": [
+        "BUY",
+        "SELL"
+      ]
+    },
+    {
+      "id": "eae88869",
+      "symbol": "NIFTY50",
+      "alert_type": "PRICE_ABOVE",
+      "threshold": 22500.0,
+      "label": "NIFTY50 PRICE_ABOVE 22500.0",
+      "created_at": "2026-04-03T12:01:31.084036+00:00",
+      "status": "TRIGGERED",
+      "notify_email": false,
+      "notify_ui": true,
+      "triggered_at": "2026-04-03T12:01:31.325967+00:00",
+      "triggered_val": 22713.099609375,
+      "message": "NIFTY50 price \u20b922,713.10 crossed ABOVE \u20b922,500.00",
+      "watch_signals": [
+        "BUY",
+        "SELL"
+      ]
+    },
+    {
+      "id": "3a1ac41b",
+      "symbol": "BTC",
+      "alert_type": "SIGNAL_CHANGE",
+      "threshold": 0.0,
+      "label": "BTC Signal",
+      "created_at": "2026-04-03T12:01:38.871285+00:00",
+      "status": "TRIGGERED",
+      "notify_email": true,
+      "notify_ui": true,
+      "triggered_at": "2026-04-03T12:01:39.107577+00:00",
+      "triggered_val": 66968.734375,
+      "message": "BTC signal changed to SELL at \u20b966,968.73",
+      "watch_signals": [
+        "BUY",
+        "SELL"
+      ]
+    },
+    {
+      "id": "bcbb707c",
+      "symbol": "NIFTY50",
+      "alert_type": "PRICE_ABOVE",
+      "threshold": 22700.0,
+      "label": "NIFTY50 PRICE_ABOVE 22700.0",
+      "created_at": "2026-04-06T07:14:01.078758+00:00",
+      "status": "TRIGGERED",
+      "notify_email": false,
+      "notify_ui": true,
+      "triggered_at": "2026-04-10T16:28:18.099068+00:00",
+      "triggered_val": 24051.80078125,
+      "message": "NIFTY50 price \u20b924,051.80 crossed ABOVE \u20b922,700.00",
+      "watch_signals": [
+        "BUY",
+        "SELL"
+      ]
+    },
+    {
+      "id": "7b6b7596",
+      "symbol": "NIFTY50",
+      "alert_type": "PRICE_ABOVE",
+      "threshold": 22670.0,
+      "label": "NIFTY50 PRICE_ABOVE 22670.0",
+      "created_at": "2026-04-06T07:15:20.518267+00:00",
+      "status": "TRIGGERED",
+      "notify_email": false,
+      "notify_ui": true,
+      "triggered_at": "2026-04-06T07:15:21.134389+00:00",
+      "triggered_val": 22685.85,
+      "message": "NIFTY50 price \u20b922,685.85 crossed ABOVE \u20b922,670.00",
+      "watch_signals": [
+        "BUY",
+        "SELL"
+      ]
+    }
+  ],
+  "fire_history": [
+    {
+      "alert_id": "babc2f93",
+      "symbol": "CRUDEOIL",
+      "alert_type": "SIGNAL_CHANGE",
+      "label": "Crude Signal",
+      "message": "CRUDEOIL signal changed to BUY at \u20b999.48",
+      "value": 99.4800033569336,
+      "threshold": 0,
+      "fired_at": "2026-04-01T17:36:31.868812+00:00"
+    },
+    {
+      "alert_id": "babc2f93",
+      "symbol": "CRUDEOIL",
+      "alert_type": "SIGNAL_CHANGE",
+      "label": "Crude Signal",
+      "message": "CRUDEOIL signal changed to BUY at \u20b999.20",
+      "value": 99.19999694824219,
+      "threshold": 0,
+      "fired_at": "2026-04-01T17:47:31.887342+00:00"
+    },
+    {
+      "alert_id": "eae88869",
+      "symbol": "NIFTY50",
+      "alert_type": "PRICE_ABOVE",
+      "label": "NIFTY50 PRICE_ABOVE 22500.0",
+      "message": "NIFTY50 price \u20b922,713.10 crossed ABOVE \u20b922,500.00",
+      "value": 22713.099609375,
+      "threshold": 22500.0,
+      "fired_at": "2026-04-03T12:01:31.325967+00:00"
+    },
+    {
+      "alert_id": "3a1ac41b",
+      "symbol": "BTC",
+      "alert_type": "SIGNAL_CHANGE",
+      "label": "BTC Signal",
+      "message": "BTC signal changed to SELL at \u20b966,968.73",
+      "value": 66968.734375,
+      "threshold": 0,
+      "fired_at": "2026-04-03T12:01:39.107577+00:00"
+    },
+    {
+      "alert_id": "7b6b7596",
+      "symbol": "NIFTY50",
+      "alert_type": "PRICE_ABOVE",
+      "label": "NIFTY50 PRICE_ABOVE 22670.0",
+      "message": "NIFTY50 price \u20b922,685.85 crossed ABOVE \u20b922,670.00",
+      "value": 22685.85,
+      "threshold": 22670.0,
+      "fired_at": "2026-04-06T07:15:21.134389+00:00"
+    },
+    {
+      "alert_id": "bcbb707c",
+      "symbol": "NIFTY50",
+      "alert_type": "PRICE_ABOVE",
+      "label": "NIFTY50 PRICE_ABOVE 22700.0",
+      "message": "NIFTY50 price \u20b924,051.80 crossed ABOVE \u20b922,700.00",
+      "value": 24051.80078125,
+      "threshold": 22700.0,
+      "fired_at": "2026-04-10T16:28:18.099068+00:00"
+    }
+  ],
+  "version": 1
+}

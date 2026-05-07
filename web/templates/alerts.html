@@ -1,0 +1,201 @@
+{% extends "base.html" %}
+{% block title %}Alerts — AI Trading Agent{% endblock %}
+
+{% block extra_css %}
+.alert-card{background:var(--bg-3);border:1px solid var(--border);border-radius:6px;padding:10px 14px;display:flex;align-items:center;gap:12px;transition:border-color .2s}
+.alert-card:hover{border-color:var(--border-2)}
+.alert-card.triggered{border-left:3px solid var(--green);opacity:.7}
+.alert-type-badge{font-size:9px;font-weight:700;padding:2px 7px;border-radius:3px;letter-spacing:.04em;flex-shrink:0}
+.at-above{background:var(--green-dim);color:var(--green)}
+.at-below{background:var(--red-dim);color:var(--red)}
+.at-rsi{background:var(--blue-dim);color:var(--blue)}
+.at-pct{background:var(--gold-dim);color:var(--gold)}
+{% endblock %}
+
+{% block content %}
+<div class="page-hd">
+  <div><div class="page-title">Price Alerts</div>
+  <div class="page-sub">Price threshold · RSI alerts · Telegram notifications</div></div>
+  <div class="page-actions">
+    <button class="btn btn-ghost btn-sm" onclick="loadAlerts()">↻ Refresh</button>
+  </div>
+</div>
+
+<div class="g2" style="align-items:start">
+  <!-- Add alert form -->
+  <div class="card">
+    <div class="card-hd">Create Alert</div>
+
+    <div class="fg">
+      <label class="lbl">Symbol</label>
+      <select class="sel" id="a-sym" style="width:100%">
+        {% for s in ["NIFTY50","BANKNIFTY","NIFTYIT","SENSEX","GOLD","SILVER","CRUDEOIL","COPPER","NATURALGAS","BTC","ETH","SOL","BNB","XRP","USDINR","RELIANCE","TCS","HDFCBANK","INFY","ICICIBANK","SBIN","WIPRO","AXISBANK","KOTAKBANK","LT","BAJFINANCE","MARUTI","SUNPHARMA","BHARTIARTL","TATASTEEL"] %}
+        <option>{{ s }}</option>
+        {% endfor %}
+      </select>
+    </div>
+
+    <div class="fg">
+      <label class="lbl">Alert Type</label>
+      <select class="sel" id="a-type" style="width:100%" onchange="onTypeChange()">
+        <option value="price_above">Price Above ↑</option>
+        <option value="price_below">Price Below ↓</option>
+        <option value="rsi_above">RSI Above (overbought)</option>
+        <option value="rsi_below">RSI Below (oversold)</option>
+        <option value="pct_change">% Change from current</option>
+      </select>
+    </div>
+
+    <div class="fg">
+      <label class="lbl" id="thresh-lbl">Threshold (₹)</label>
+      <input class="inp" id="a-thresh" type="number" placeholder="Enter value" step="0.01">
+    </div>
+
+    <div class="fg">
+      <label class="lbl">Note (optional)</label>
+      <input class="inp" id="a-note" placeholder="Reason for alert…">
+    </div>
+
+    <div style="display:flex;align-items:center;gap:8px;margin-bottom:14px">
+      <input type="checkbox" id="a-once" checked style="accent-color:var(--blue)">
+      <label for="a-once" class="lbl" style="margin:0;cursor:pointer">Fire once then delete</label>
+    </div>
+
+    <!-- Current price hint -->
+    <div id="price-hint" style="background:var(--bg-4);border-radius:5px;padding:6px 10px;margin-bottom:14px;font-size:11px;color:var(--txt-2)">
+      Select a symbol to see current price
+    </div>
+
+    <button class="btn btn-primary" style="width:100%;justify-content:center" onclick="addAlert()">
+      + Create Alert
+    </button>
+  </div>
+
+  <!-- Active alerts -->
+  <div class="gap">
+    <div class="card">
+      <div class="card-hd">
+        Active Alerts
+        <span class="dim" id="alert-count" style="font-size:10px">0 alerts</span>
+      </div>
+      <div id="alert-list" style="display:flex;flex-direction:column;gap:8px">
+        <div style="color:var(--txt-3);font-size:11px;text-align:center;padding:16px">No active alerts</div>
+      </div>
+    </div>
+
+    <!-- Telegram setup -->
+    <div class="card">
+      <div class="card-hd">Telegram Notifications</div>
+      <div style="display:flex;flex-direction:column;gap:10px;font-size:12px">
+        <div style="background:var(--bg-3);border-radius:6px;padding:12px">
+          <div style="font-weight:600;color:var(--txt);margin-bottom:6px">Setup Instructions</div>
+          <ol style="color:var(--txt-2);padding-left:16px;display:flex;flex-direction:column;gap:6px;font-size:11px">
+            <li>Open Telegram → search <code style="color:var(--blue)">@BotFather</code></li>
+            <li>Send <code style="color:var(--blue)">/newbot</code> → name it → get token</li>
+            <li>Add token to <code style="color:var(--blue)">config/settings.py</code> as <code style="color:var(--blue)">TELEGRAM_TOKEN</code></li>
+            <li>Message your bot once to get chat ID</li>
+            <li>Add chat ID as <code style="color:var(--blue)">TELEGRAM_CHAT_ID</code></li>
+          </ol>
+        </div>
+        <div style="background:var(--bg-3);border-radius:6px;padding:10px 12px">
+          <div style="font-size:10px;font-weight:700;letter-spacing:.06em;color:var(--txt-3);margin-bottom:4px">ALERT TYPES</div>
+          {% for t,desc in [
+            ("price_above","Fires when price crosses above threshold"),
+            ("price_below","Fires when price crosses below threshold"),
+            ("rsi_above","RSI enters overbought zone (default 70)"),
+            ("rsi_below","RSI enters oversold zone (default 30)"),
+            ("pct_change","% move from price at alert creation"),
+          ] %}
+          <div style="font-size:10px;color:var(--txt-2);padding:3px 0;border-bottom:1px solid var(--border)">
+            <span style="color:var(--txt);font-weight:600">{{ t }}</span> — {{ desc }}
+          </div>
+          {% endfor %}
+        </div>
+      </div>
+    </div>
+  </div>
+</div>
+{% endblock %}
+
+{% block extra_js %}
+<script>
+let currentPrices = {};
+
+window.addEventListener("prices", e => {
+  currentPrices = e.detail.prices;
+  updatePriceHint();
+});
+
+function updatePriceHint() {
+  const sym  = document.getElementById("a-sym").value;
+  const info = currentPrices[sym];
+  const el   = document.getElementById("price-hint");
+  if (info) {
+    el.innerHTML = `Current <strong style="color:var(--txt)">${sym}</strong>: <span class="mono up">${fmtDisplay(sym, info.display, info.label)}</span> · Age: ${info.age < 60 ? info.age+"s" : "stale"}`;
+  }
+}
+
+function onTypeChange() {
+  const type = document.getElementById("a-type").value;
+  const lbl  = document.getElementById("thresh-lbl");
+  const inp  = document.getElementById("a-thresh");
+  if (type.startsWith("rsi"))  { lbl.textContent="RSI Value (0-100)"; inp.placeholder="70"; inp.max="100"; inp.min="0"; }
+  else if (type==="pct_change"){ lbl.textContent="% Change"; inp.placeholder="±2.5"; inp.max="100"; inp.min="-100"; }
+  else { lbl.textContent="Threshold (₹)"; inp.placeholder="Enter price"; inp.removeAttribute("max"); inp.removeAttribute("min"); }
+}
+
+async function addAlert() {
+  const sym    = document.getElementById("a-sym").value;
+  const type   = document.getElementById("a-type").value;
+  const thresh = parseFloat(document.getElementById("a-thresh").value);
+  const note   = document.getElementById("a-note").value;
+  const once   = document.getElementById("a-once").checked;
+  if (!thresh) { toast("Enter a threshold value","err"); return; }
+
+  const data = await api("/api/alert/add","POST",{
+    symbol:sym, type, threshold:thresh, note, fire_once:once
+  });
+  if (data.ok) {
+    toast(`Alert created: ${sym} ${type} @ ${thresh}`, "ok");
+    document.getElementById("a-thresh").value = "";
+    document.getElementById("a-note").value   = "";
+    loadAlerts();
+  } else {
+    toast("Failed: " + (data.error||"unknown"), "err");
+  }
+}
+
+async function deleteAlert(id) {
+  const data = await api("/api/alert/delete","POST",{id});
+  if (data.ok) { toast("Alert deleted","ok"); loadAlerts(); }
+  else toast("Delete failed","err");
+}
+
+async function loadAlerts() {
+  const data = await api("/api/alerts");
+  const el   = document.getElementById("alert-list");
+  const cnt  = document.getElementById("alert-count");
+  if (!data.ok) { el.innerHTML=`<div style="color:var(--txt-3);font-size:11px;text-align:center;padding:16px">Error loading alerts</div>`; return; }
+  const alerts = data.alerts || [];
+  cnt.textContent = `${alerts.length} alert${alerts.length!==1?"s":""}`;
+  if (!alerts.length) {
+    el.innerHTML = `<div style="color:var(--txt-3);font-size:11px;text-align:center;padding:16px">No active alerts</div>`; return;
+  }
+  const TYPE_CLS = {price_above:"at-above",price_below:"at-below",rsi_above:"at-rsi",rsi_below:"at-rsi",pct_change:"at-pct"};
+  el.innerHTML = alerts.map(a => `
+    <div class="alert-card ${a.triggered?'triggered':''}">
+      <span class="alert-type-badge ${TYPE_CLS[a.type]||'at-above'}">${a.type.replace(/_/g," ").toUpperCase()}</span>
+      <div style="flex:1">
+        <div style="font-size:12px;font-weight:600;color:var(--txt)">${a.symbol} — ${a.threshold}</div>
+        ${a.note ? `<div style="font-size:10px;color:var(--txt-3)">${a.note}</div>` : ""}
+        <div style="font-size:9px;color:var(--txt-3);margin-top:2px">${a.fire_once?"Single fire":"Repeating"} ${a.triggered?"· ✅ Triggered":""}</div>
+      </div>
+      <button onclick="deleteAlert('${a.id}')" class="btn btn-ghost btn-sm" style="flex-shrink:0">✕</button>
+    </div>`).join("");
+}
+
+document.getElementById("a-sym").addEventListener("change", updatePriceHint);
+loadAlerts();
+setInterval(loadAlerts, 30000);
+</script>
+{% endblock %}

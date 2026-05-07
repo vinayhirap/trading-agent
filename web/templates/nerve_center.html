@@ -1,0 +1,452 @@
+{% extends "base.html" %}
+{% block title %}Nerve Center — AI Trading Agent{% endblock %}
+
+{% block extra_css %}
+.heat-grid{display:grid;grid-template-columns:repeat(5,1fr);gap:6px;margin-bottom:14px}
+.heat-cell{
+  border-radius:6px;padding:10px 12px;cursor:default;transition:transform .15s,box-shadow .2s;
+  border:1px solid transparent;position:relative;overflow:hidden;min-height:72px;
+}
+.heat-cell:hover{transform:translateY(-1px);box-shadow:0 4px 20px rgba(0,0,0,.4)}
+.heat-cell .h-sym{font-size:9px;font-weight:700;letter-spacing:.08em;text-transform:uppercase;opacity:.7;margin-bottom:4px}
+.heat-cell .h-val{font-family:var(--mono-font);font-size:15px;font-weight:600;line-height:1}
+.heat-cell .h-chg{font-family:var(--mono-font);font-size:10px;margin-top:3px}
+.heat-cell .h-sent{font-size:8px;font-weight:700;letter-spacing:.06em;margin-top:5px;opacity:.8}
+.heat-cell.bull-3{background:rgba(0,232,122,.22);border-color:rgba(0,232,122,.35);color:var(--green)}
+.heat-cell.bull-2{background:rgba(0,232,122,.13);border-color:rgba(0,232,122,.2);color:#00c96a}
+.heat-cell.bull-1{background:rgba(0,232,122,.06);border-color:rgba(0,232,122,.1);color:#00a855}
+.heat-cell.neutral{background:var(--bg-2);border-color:var(--border);color:var(--txt-2)}
+.heat-cell.bear-1{background:rgba(255,51,102,.06);border-color:rgba(255,51,102,.1);color:#cc2244}
+.heat-cell.bear-2{background:rgba(255,51,102,.13);border-color:rgba(255,51,102,.2);color:#ff2255}
+.heat-cell.bear-3{background:rgba(255,51,102,.22);border-color:rgba(255,51,102,.35);color:var(--red)}
+.shock-item{padding:12px 14px;background:var(--bg-2);border:1px solid var(--border);border-radius:6px;transition:border-color .2s}
+.shock-item:hover{border-color:var(--border-2)}
+.shock-item.high{border-left:3px solid var(--red)}
+.shock-item.med{border-left:3px solid var(--gold)}
+.shock-item.low{border-left:3px solid var(--txt-3)}
+.shock-mag{font-family:var(--mono-font);font-size:20px;font-weight:700;line-height:1}
+.shock-title{font-size:12px;font-weight:600;color:var(--txt);line-height:1.4;margin:4px 0}
+.shock-meta{font-size:9px;color:var(--txt-3);letter-spacing:.04em}
+.impact-chip{display:inline-block;padding:2px 7px;border-radius:3px;font-size:8px;font-weight:700;letter-spacing:.06em;margin-right:4px}
+.analyst-card{background:var(--bg-3);border-radius:6px;padding:12px;border:1px solid var(--border)}
+.analyst-card h4{font-size:11px;font-weight:700;color:var(--txt);margin-bottom:6px}
+.analyst-card p{font-size:11px;color:var(--txt-2);line-height:1.5}
+.mood-bar{height:8px;border-radius:4px;background:var(--bg-4);overflow:hidden;margin:8px 0}
+.mood-fill{height:100%;border-radius:4px;transition:width .8s ease}
+{% endblock %}
+
+{% block content %}
+<div class="page-hd">
+  <div>
+    <div class="page-title">🧠 Nerve Center</div>
+    <div class="page-sub">News → Market impact heatmap · Shock feed · Morning brief · <span class="live"></span> Live intelligence</div>
+  </div>
+  <div class="page-actions">
+    <select class="sel" id="nc-view" onchange="switchView(this.value)">
+      <option value="heatmap">Impact Heatmap</option>
+      <option value="shockfeed">Shock Feed</option>
+      <option value="brief">Morning Brief</option>
+      <option value="manual">Manual Analysis</option>
+    </select>
+    <button class="btn btn-ghost btn-sm" onclick="loadAll()">↻ Refresh</button>
+    <span class="dim mono" id="nc-time" style="font-size:11px">—</span>
+  </div>
+</div>
+
+<!-- Global sentiment banner -->
+<div id="sentiment-banner" style="margin-bottom:18px;padding:12px 16px;border-radius:8px;border:1px solid var(--border);background:var(--bg-2);display:flex;align-items:center;gap:20px">
+  <div>
+    <div style="font-size:9px;font-weight:700;letter-spacing:.1em;color:var(--txt-3);margin-bottom:4px">GLOBAL MARKET MOOD</div>
+    <div id="mood-label" style="font-size:18px;font-weight:800;color:var(--txt)">Loading…</div>
+  </div>
+  <div style="flex:1">
+    <div style="display:flex;justify-content:space-between;font-size:9px;color:var(--txt-3);margin-bottom:3px">
+      <span>BEARISH</span><span>NEUTRAL</span><span>BULLISH</span>
+    </div>
+    <div class="mood-bar">
+      <div class="mood-fill" id="mood-fill" style="width:50%;background:var(--blue)"></div>
+    </div>
+  </div>
+  <div style="display:flex;gap:16px">
+    <div style="text-align:center"><div class="kpi-lbl">Articles</div><div class="kpi-val" id="nc-total" style="font-size:16px">—</div></div>
+    <div style="text-align:center"><div class="kpi-lbl">Bullish</div><div class="kpi-val up" id="nc-bull" style="font-size:16px">—</div></div>
+    <div style="text-align:center"><div class="kpi-lbl">Bearish</div><div class="kpi-val dn" id="nc-bear" style="font-size:16px">—</div></div>
+    <div style="text-align:center"><div class="kpi-lbl">High Impact</div><div class="kpi-val" id="nc-impact" style="font-size:16px;color:var(--gold)">—</div></div>
+  </div>
+</div>
+
+<!-- VIEW: HEATMAP -->
+<div id="view-heatmap">
+  <div class="card-hd" style="margin-bottom:10px">Market Impact Heatmap — News Sentiment by Asset</div>
+  <div class="heat-grid" id="heat-grid">
+    {% for sym in ["NIFTY50","BANKNIFTY","NIFTYIT","GOLD","SILVER","CRUDEOIL","COPPER","NATURALGAS","BTC","ETH","SOL","BNB","XRP","USDINR","EURUSD","RELIANCE","TCS","HDFCBANK","INFY","ICICIBANK"] %}
+    <div class="heat-cell neutral" id="hc-{{ sym }}">
+      <div class="h-sym">{{ sym }}</div>
+      <div class="h-val" id="hv-{{ sym }}">—</div>
+      <div class="h-chg" id="hchg-{{ sym }}">Loading…</div>
+      <div class="h-sent" id="hsent-{{ sym }}">—</div>
+    </div>
+    {% endfor %}
+  </div>
+
+  <!-- Sector sentiment breakdown -->
+  <div class="g2" style="margin-top:14px">
+    <div class="card">
+      <div class="card-hd">Sector Sentiment</div>
+      <div id="sector-sentiment" style="display:flex;flex-direction:column;gap:8px">
+        <div style="color:var(--txt-3);font-size:11px">Loading…</div>
+      </div>
+    </div>
+    <div class="card">
+      <div class="card-hd">Asset Class Sentiment</div>
+      <div id="asset-sentiment" style="display:flex;flex-direction:column;gap:8px">
+        <div style="color:var(--txt-3);font-size:11px">Loading…</div>
+      </div>
+    </div>
+  </div>
+</div>
+
+<!-- VIEW: SHOCK FEED -->
+<div id="view-shockfeed" style="display:none">
+  <div class="card-hd" style="margin-bottom:10px">Shock Feed — Ranked by Market Impact (not recency)</div>
+  <div id="shock-list" style="display:flex;flex-direction:column;gap:8px">
+    <div style="text-align:center;padding:40px;color:var(--txt-3)"><div class="spin" style="display:inline-block"></div> Loading shocks…</div>
+  </div>
+</div>
+
+<!-- VIEW: MORNING BRIEF -->
+<div id="view-brief" style="display:none">
+  <div class="g2">
+    <div>
+      <div class="card-hd" style="margin-bottom:10px">Morning Analyst Brief</div>
+      <div id="brief-content" style="display:flex;flex-direction:column;gap:10px">
+        <div style="color:var(--txt-3);font-size:12px">Loading brief…</div>
+      </div>
+    </div>
+    <div>
+      <div class="card-hd" style="margin-bottom:10px">Risk-On / Risk-Off Gauge</div>
+      <div id="roro-gauge" class="card" style="text-align:center;padding:30px">
+        <div id="roro-label" style="font-size:32px;font-weight:800;margin-bottom:8px">—</div>
+        <div id="roro-sub" style="font-size:12px;color:var(--txt-2)">Loading…</div>
+      </div>
+      <div class="card" style="margin-top:10px">
+        <div class="card-hd">Top 3 Trading Ideas</div>
+        <div id="top-ideas" style="display:flex;flex-direction:column;gap:8px">
+          <div style="color:var(--txt-3);font-size:11px">Loading…</div>
+        </div>
+      </div>
+    </div>
+  </div>
+</div>
+
+<!-- VIEW: MANUAL ANALYSIS -->
+<div id="view-manual" style="display:none">
+  <div class="card">
+    <div class="card-hd">Paste Headlines for AI Impact Analysis</div>
+    <textarea class="inp" id="manual-text" rows="6"
+      placeholder="Paste news headlines here, one per line…
+Example:
+RBI keeps rates unchanged at 6.5%
+US CPI comes in hotter than expected at 3.8%
+OPEC+ cuts production by 1mb/d
+Fed signals 2 cuts in 2025"></textarea>
+    <button class="btn btn-primary" style="margin-top:10px" onclick="analyseManual()">Analyse Headlines →</button>
+  </div>
+  <div id="manual-result" style="margin-top:14px;display:none"></div>
+</div>
+{% endblock %}
+
+{% block extra_js %}
+<script>
+let newsData = null, signalData = {}, priceData = {};
+let currentView = "heatmap";
+
+window.addEventListener("prices", e => {
+  priceData = e.detail.prices;
+  updateHeatPrices();
+});
+
+const ASSET_GROUPS = {
+  "Indices":    ["NIFTY50","BANKNIFTY","NIFTYIT"],
+  "Commodities":["GOLD","SILVER","CRUDEOIL","COPPER","NATURALGAS"],
+  "Crypto":     ["BTC","ETH","SOL","BNB","XRP"],
+  "Forex":      ["USDINR","EURUSD"],
+  "Equities":   ["RELIANCE","TCS","HDFCBANK","INFY","ICICIBANK"],
+};
+
+const HEAT_SYMS = ["NIFTY50","BANKNIFTY","NIFTYIT","GOLD","SILVER","CRUDEOIL","COPPER","NATURALGAS","BTC","ETH","SOL","BNB","XRP","USDINR","EURUSD","RELIANCE","TCS","HDFCBANK","INFY","ICICIBANK"];
+
+function switchView(v) {
+  currentView = v;
+  ["heatmap","shockfeed","brief","manual"].forEach(id => {
+    document.getElementById("view-" + id).style.display = id === v ? "" : "none";
+  });
+  if (v === "brief") renderBrief();
+}
+
+async function loadAll() {
+  const [newsResp, sigResp] = await Promise.all([
+    api("/api/news"),
+    api("/api/signals?symbols=" + HEAT_SYMS.join(","))
+  ]);
+  document.getElementById("nc-time").textContent = "Updated " + new Date().toLocaleTimeString();
+
+  if (newsResp.ok && newsResp.sentiment) {
+    newsData = newsResp.sentiment;
+    updateBanner(newsResp.sentiment);
+  }
+  if (sigResp.ok) signalData = sigResp.signals || {};
+
+  renderHeatmap();
+  renderShockFeed();
+  if (currentView === "brief") renderBrief();
+}
+
+function updateBanner(s) {
+  const score = s.composite_score ?? s.score ?? 0;
+  const arts  = s.articles || [];
+  const bull  = arts.filter(a => (a.sentiment||"").toUpperCase().includes("BULL") || (a.sentiment||"").toUpperCase().includes("POS")).length;
+  const bear  = arts.filter(a => (a.sentiment||"").toUpperCase().includes("BEAR") || (a.sentiment||"").toUpperCase().includes("NEG")).length;
+
+  const mood = score > 0.15 ? "🐂 Risk-On — Bullish" : score < -0.15 ? "🐻 Risk-Off — Bearish" : "😐 Cautious — Neutral";
+  document.getElementById("mood-label").textContent = mood;
+
+  // Fill bar: 0=far left(bearish) 50=center 100=far right(bullish)
+  const fillPct = Math.round(50 + score * 200);
+  const fill = document.getElementById("mood-fill");
+  fill.style.width = Math.min(100, Math.max(0, fillPct)) + "%";
+  fill.style.background = score > 0.1 ? "var(--green)" : score < -0.1 ? "var(--red)" : "var(--blue)";
+
+  document.getElementById("nc-total").textContent  = arts.length;
+  document.getElementById("nc-bull").textContent   = bull;
+  document.getElementById("nc-bear").textContent   = bear;
+  // Count high impact (score > 0.3)
+  const hi = arts.filter(a => Math.abs(a.score||0) > 0.3).length;
+  document.getElementById("nc-impact").textContent = hi;
+}
+
+function getSentimentForSym(sym) {
+  if (!newsData) return 0;
+  const arts = (newsData.articles || []).filter(a => (a.symbols||[]).includes(sym));
+  if (!arts.length) return 0;
+  return arts.reduce((s,a) => s + (a.score||0), 0) / arts.length;
+}
+
+function sentClass(score) {
+  if (score > 0.3)  return "bull-3";
+  if (score > 0.15) return "bull-2";
+  if (score > 0.05) return "bull-1";
+  if (score < -0.3) return "bear-3";
+  if (score < -0.15)return "bear-2";
+  if (score < -0.05)return "bear-1";
+  return "neutral";
+}
+
+function renderHeatmap() {
+  HEAT_SYMS.forEach(sym => {
+    const score = getSentimentForSym(sym);
+    const sig   = signalData[sym] || {};
+    const cls   = sentClass(score);
+    const cell  = document.getElementById("hc-" + sym);
+    if (!cell) return;
+    cell.className = "heat-cell " + cls;
+
+    const sentTxt = score > 0.05 ? "BULLISH" : score < -0.05 ? "BEARISH" : "NEUTRAL";
+    document.getElementById("hsent-" + sym).textContent = sentTxt + " " + (score ? score.toFixed(2) : "");
+  });
+
+  updateHeatPrices();
+  renderSectorBreakdown();
+}
+
+function updateHeatPrices() {
+  HEAT_SYMS.forEach(sym => {
+    const info = priceData[sym];
+    if (!info) return;
+    const vEl = document.getElementById("hv-" + sym);
+    if (vEl) vEl.textContent = fmtDisplay(sym, info.display, info.label);
+  });
+}
+
+function renderSectorBreakdown() {
+  const sectorEl = document.getElementById("sector-sentiment");
+  const assetEl  = document.getElementById("asset-sentiment");
+
+  // Sector breakdown
+  const sectors = {
+    "Banking":    ["HDFCBANK","ICICIBANK","AXISBANK","KOTAKBANK","SBIN"],
+    "IT":         ["TCS","INFY","WIPRO","NIFTYIT"],
+    "Energy":     ["CRUDEOIL","NATURALGAS","ONGC"],
+    "Metals":     ["GOLD","SILVER","COPPER","TATASTEEL"],
+    "Indices":    ["NIFTY50","BANKNIFTY"],
+  };
+  sectorEl.innerHTML = Object.entries(sectors).map(([name, syms]) => {
+    const scores = syms.map(s => getSentimentForSym(s)).filter(Boolean);
+    const avg    = scores.length ? scores.reduce((a,b)=>a+b,0)/scores.length : 0;
+    const pct    = Math.round(50 + avg * 200);
+    const col    = avg > 0.05 ? "var(--green)" : avg < -0.05 ? "var(--red)" : "var(--txt-3)";
+    return `<div>
+      <div style="display:flex;justify-content:space-between;font-size:10px;margin-bottom:3px">
+        <span class="dim">${name}</span>
+        <span style="color:${col};font-family:var(--mono-font)">${avg>0?"+":""}${avg.toFixed(3)}</span>
+      </div>
+      <div style="height:4px;background:var(--bg-4);border-radius:2px">
+        <div style="width:${Math.min(100,Math.max(0,pct))}%;height:100%;background:${col};border-radius:2px;transition:width .6s"></div>
+      </div>
+    </div>`;
+  }).join("");
+
+  // Asset class breakdown
+  assetEl.innerHTML = Object.entries(ASSET_GROUPS).map(([name, syms]) => {
+    const scores = syms.map(s => getSentimentForSym(s)).filter(Boolean);
+    const avg    = scores.length ? scores.reduce((a,b)=>a+b,0)/scores.length : 0;
+    const pct    = Math.round(50 + avg * 200);
+    const col    = avg > 0.05 ? "var(--green)" : avg < -0.05 ? "var(--red)" : "var(--txt-3)";
+    return `<div>
+      <div style="display:flex;justify-content:space-between;font-size:10px;margin-bottom:3px">
+        <span class="dim">${name}</span>
+        <span style="color:${col};font-family:var(--mono-font)">${avg>0?"+":""}${avg.toFixed(3)}</span>
+      </div>
+      <div style="height:4px;background:var(--bg-4);border-radius:2px">
+        <div style="width:${Math.min(100,Math.max(0,pct))}%;height:100%;background:${col};border-radius:2px;transition:width .6s"></div>
+      </div>
+    </div>`;
+  }).join("");
+}
+
+function renderShockFeed() {
+  const arts = (newsData?.articles || [])
+    .filter(a => Math.abs(a.score||0) > 0.05)
+    .sort((a,b) => Math.abs(b.score||0) - Math.abs(a.score||0))
+    .slice(0, 20);
+
+  if (!arts.length) {
+    document.getElementById("shock-list").innerHTML =
+      `<div class="card" style="color:var(--txt-3);text-align:center;padding:24px">No significant shocks detected. Markets appear calm.</div>`;
+    return;
+  }
+
+  document.getElementById("shock-list").innerHTML = arts.map(a => {
+    const score = a.score || 0;
+    const abs   = Math.abs(score);
+    const isBull= score > 0;
+    const mag   = abs > 0.3 ? "high" : abs > 0.15 ? "med" : "low";
+    const col   = isBull ? "var(--green)" : "var(--red)";
+    const syms  = (a.symbols||[]).slice(0,4);
+    const age   = a.age_mins ? `${Math.round(a.age_mins)}m ago` : "";
+    return `<div class="shock-item ${mag}" onclick="window.open('${a.url||"#"}','_blank')">
+      <div style="display:flex;align-items:flex-start;gap:14px">
+        <div style="text-align:center;min-width:50px">
+          <div class="shock-mag" style="color:${col}">${isBull?"+":""}${score.toFixed(2)}</div>
+          <div style="font-size:8px;color:var(--txt-3);margin-top:2px">${mag.toUpperCase()}</div>
+        </div>
+        <div style="flex:1">
+          <div class="shock-title">${a.title||"Untitled"}</div>
+          <div class="shock-meta">
+            ${a.source||""} ${age ? "· " + age : ""}
+            ${syms.map(s=>`<span class="impact-chip" style="background:var(--bg-4);color:var(--txt-2)">${s}</span>`).join("")}
+          </div>
+        </div>
+        <div style="text-align:right;flex-shrink:0">
+          <div style="font-size:9px;font-weight:700;color:${col}">${isBull?"BULLISH":"BEARISH"}</div>
+        </div>
+      </div>
+    </div>`;
+  }).join("");
+}
+
+function renderBrief() {
+  const arts   = newsData?.articles || [];
+  const score  = newsData?.composite_score ?? newsData?.score ?? 0;
+  const top3   = [...arts].sort((a,b) => Math.abs(b.score||0) - Math.abs(a.score||0)).slice(0,3);
+
+  // Risk-on/off gauge
+  const roroEl = document.getElementById("roro-label");
+  const roroSub= document.getElementById("roro-sub");
+  if (score > 0.15) {
+    roroEl.textContent = "🟢 RISK-ON";
+    roroEl.style.color = "var(--green)";
+    roroSub.textContent= "Markets pricing growth. Equities, commodities favoured.";
+  } else if (score < -0.15) {
+    roroEl.textContent = "🔴 RISK-OFF";
+    roroEl.style.color = "var(--red)";
+    roroSub.textContent= "Flight to safety. Gold, USD, bonds favoured.";
+  } else {
+    roroEl.textContent = "⚪ NEUTRAL";
+    roroEl.style.color = "var(--txt-2)";
+    roroSub.textContent= "Mixed signals. Wait for confirmation before trading.";
+  }
+
+  // Brief cards
+  document.getElementById("brief-content").innerHTML = top3.map((a,i) => `
+    <div class="analyst-card">
+      <h4>${["📰 Top Story","📈 Market Mover","⚡ Watch This"][i]}</h4>
+      <p>${a.title||"No headline"}</p>
+      <div style="margin-top:6px;font-size:9px;color:var(--txt-3)">${a.source||""} · Score: ${(a.score||0).toFixed(2)} · ${(a.symbols||[]).join(", ")||"General"}</div>
+    </div>`).join("") || `<div style="color:var(--txt-3);font-size:12px">Load news to see morning brief</div>`;
+
+  // Top ideas from signals
+  const ideas = Object.entries(signalData)
+    .filter(([,s]) => (s.confidence||0) >= 0.6 && s.action !== "HOLD")
+    .sort((a,b) => (b[1].confidence||0) - (a[1].confidence||0))
+    .slice(0,3);
+
+  document.getElementById("top-ideas").innerHTML = ideas.map(([sym, s]) => {
+    const rec  = (s.recommended_instrument||s.action||"").toUpperCase();
+    const isBuy= rec.includes("BUY");
+    const conf = Math.round((s.confidence||0.5)*100);
+    return `<div style="padding:8px 10px;background:var(--bg-3);border-radius:5px;border-left:2px solid ${isBuy?"var(--green)":"var(--red)"}">
+      <div style="display:flex;justify-content:space-between">
+        <span style="font-weight:700;font-size:12px">${sym}</span>
+        <span class="${isBuy?"up":"dn"}" style="font-size:11px;font-weight:700">${rec}</span>
+      </div>
+      <div style="font-size:10px;color:var(--txt-3);margin-top:3px">Confidence: ${conf}% · ${(s.regime||"").replace(/_/g," ")||"—"} · ${s.session_label||"—"}</div>
+    </div>`;
+  }).join("") || `<div style="color:var(--txt-3);font-size:11px">No high-confidence signals</div>`;
+}
+
+async function analyseManual() {
+  const text = document.getElementById("manual-text").value.trim();
+  if (!text) { toast("Enter some headlines first","err"); return; }
+
+  const headlines = text.split("\n").filter(l => l.trim());
+  const resultEl  = document.getElementById("manual-result");
+  resultEl.style.display = "block";
+  resultEl.innerHTML = `<div class="card" style="text-align:center;padding:20px;color:var(--txt-3)"><div class="spin" style="display:inline-block"></div> Analysing ${headlines.length} headlines…</div>`;
+
+  // Simple rule-based keyword analysis
+  const bullKeywords = ["rise","gain","surge","rally","up","beat","positive","growth","buy","bullish","support","rate cut","stimulus","record","high"];
+  const bearKeywords = ["fall","drop","decline","crash","down","miss","negative","loss","sell","bearish","resistance","rate hike","inflation","recession","low","risk"];
+
+  const results = headlines.map(h => {
+    const lower = h.toLowerCase();
+    const bullScore = bullKeywords.filter(k => lower.includes(k)).length;
+    const bearScore = bearKeywords.filter(k => lower.includes(k)).length;
+    const score = (bullScore - bearScore) / Math.max(1, bullScore + bearScore);
+    const label = score > 0.1 ? "BULLISH" : score < -0.1 ? "BEARISH" : "NEUTRAL";
+    const col   = score > 0.1 ? "var(--green)" : score < -0.1 ? "var(--red)" : "var(--txt-3)";
+    return { h, score, label, col };
+  });
+
+  const avg = results.reduce((s,r) => s + r.score, 0) / results.length;
+
+  resultEl.innerHTML = `
+    <div class="card">
+      <div class="card-hd">Analysis Results</div>
+      <div style="margin-bottom:14px;padding:10px 12px;border-radius:6px;background:var(--bg-3);display:flex;align-items:center;gap:14px">
+        <div style="font-size:24px;font-weight:800;color:${avg>0.1?"var(--green)":avg<-0.1?"var(--red)":"var(--txt-2)"}">${avg>0.1?"🐂 BULLISH":avg<-0.1?"🐻 BEARISH":"😐 NEUTRAL"}</div>
+        <div style="color:var(--txt-2);font-size:12px">Composite score: ${avg.toFixed(3)} across ${results.length} headline${results.length!==1?"s":""}</div>
+      </div>
+      ${results.map(r => `
+        <div style="display:flex;align-items:center;gap:12px;padding:8px 0;border-bottom:1px solid var(--border)">
+          <span style="font-size:9px;font-weight:700;min-width:60px;color:${r.col}">${r.label}</span>
+          <span style="font-size:11px;color:var(--txt);flex:1">${r.h}</span>
+          <span style="font-family:var(--mono-font);font-size:10px;color:${r.col}">${r.score>0?"+":""}${r.score.toFixed(2)}</span>
+        </div>`).join("")}
+    </div>`;
+}
+
+loadAll();
+setInterval(loadAll, 120000);
+</script>
+{% endblock %}

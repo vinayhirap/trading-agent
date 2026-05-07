@@ -1,0 +1,239 @@
+{% extends "base.html" %}
+{% block title %}News Feed — AI Trading Agent{% endblock %}
+
+{% block extra_css %}
+.news-card{background:var(--bg-2);border:1px solid var(--border);border-radius:var(--r);padding:14px 16px;transition:border-color .2s;cursor:pointer}
+.news-card:hover{border-color:var(--border-2);background:var(--bg-3)}
+.news-card.bull{border-left:3px solid var(--green)}
+.news-card.bear{border-left:3px solid var(--red)}
+.news-card.neut{border-left:3px solid var(--txt-3)}
+.news-title{font-size:13px;font-weight:600;color:var(--txt);line-height:1.4;margin-bottom:6px}
+.news-meta{display:flex;gap:10px;align-items:center;flex-wrap:wrap}
+.news-src{font-size:10px;color:var(--txt-3);font-weight:600;letter-spacing:.04em;text-transform:uppercase}
+.news-age{font-size:10px;color:var(--txt-3)}
+.sent-badge{font-size:9px;font-weight:700;padding:2px 7px;border-radius:3px;letter-spacing:.04em}
+.sent-pos{background:var(--green-dim);color:var(--green)}
+.sent-neg{background:var(--red-dim);color:var(--red)}
+.sent-neu{background:var(--bg-4);color:var(--txt-3)}
+.sent-bar{height:4px;border-radius:2px;overflow:hidden;background:var(--bg-4);margin-top:8px}
+.sent-fill{height:100%;border-radius:2px;transition:width .6s}
+{% endblock %}
+
+{% block content %}
+<div class="page-hd">
+  <div>
+    <div class="page-title">News Feed</div>
+    <div class="page-sub">Real-time market news · AI sentiment · Impact scoring</div>
+  </div>
+  <div class="page-actions">
+    <select class="sel" id="filter-sent" onchange="filterNews()">
+      <option value="ALL">All Sentiment</option>
+      <option value="BULLISH">Bullish</option>
+      <option value="BEARISH">Bearish</option>
+      <option value="NEUTRAL">Neutral</option>
+    </select>
+    <button class="btn btn-ghost btn-sm" onclick="loadNews()">↻ Refresh</button>
+    <span class="dim mono" id="news-time" style="font-size:11px">—</span>
+  </div>
+</div>
+
+<!-- Sentiment summary -->
+<div class="kpi-row" style="grid-template-columns:repeat(5,1fr);margin-bottom:18px">
+  <div class="kpi">
+    <div class="kpi-lbl">Market Mood</div>
+    <div class="kpi-val" id="sent-mood" style="font-size:16px">—</div>
+  </div>
+  <div class="kpi">
+    <div class="kpi-lbl">Bullish Articles</div>
+    <div class="kpi-val up" id="sent-bull">—</div>
+  </div>
+  <div class="kpi">
+    <div class="kpi-lbl">Bearish Articles</div>
+    <div class="kpi-val dn" id="sent-bear">—</div>
+  </div>
+  <div class="kpi">
+    <div class="kpi-lbl">Avg Score</div>
+    <div class="kpi-val" id="sent-avg">—</div>
+  </div>
+  <div class="kpi">
+    <div class="kpi-lbl">Total Articles</div>
+    <div class="kpi-val" id="sent-total">—</div>
+  </div>
+</div>
+
+<div class="g2">
+  <!-- News list -->
+  <div>
+    <div class="card-hd" style="margin-bottom:10px">
+      Latest News
+      <span class="dim" id="shown-news" style="font-size:10px"></span>
+    </div>
+    <div id="news-list" style="display:flex;flex-direction:column;gap:8px">
+      <div style="text-align:center;padding:40px;color:var(--txt-3)">
+        <div style="display:flex;align-items:center;justify-content:center;gap:8px">
+          <div class="spin"></div> Loading news…
+        </div>
+      </div>
+    </div>
+  </div>
+
+  <!-- Right panel -->
+  <div class="gap">
+    <!-- Sentiment gauge -->
+    <div class="card">
+      <div class="card-hd">Sentiment Breakdown</div>
+      <div id="sent-breakdown" style="display:flex;flex-direction:column;gap:10px">
+        <div style="color:var(--txt-3);font-size:12px">Loading…</div>
+      </div>
+    </div>
+
+    <!-- Top movers by sentiment -->
+    <div class="card">
+      <div class="card-hd">Most Mentioned</div>
+      <div id="top-mentioned" style="display:flex;flex-direction:column;gap:6px">
+        <div style="color:var(--txt-3);font-size:12px">Loading…</div>
+      </div>
+    </div>
+
+    <!-- Market impact -->
+    <div class="card">
+      <div class="card-hd">Market Impact Events</div>
+      <div id="impact-list" style="display:flex;flex-direction:column;gap:8px">
+        <div style="color:var(--txt-3);font-size:12px">Loading…</div>
+      </div>
+    </div>
+  </div>
+</div>
+{% endblock %}
+
+{% block extra_js %}
+<script>
+let allArticles = [], rawSentiment = null;
+
+async function loadNews() {
+  const data = await api("/api/news");
+  document.getElementById("news-time").textContent = "Updated " + new Date().toLocaleTimeString();
+  if (!data.ok || !data.sentiment) {
+    document.getElementById("news-list").innerHTML =
+      `<div class="card" style="color:var(--txt-3);text-align:center;padding:20px">Unable to load news</div>`;
+    return;
+  }
+  rawSentiment = data.sentiment;
+  allArticles  = data.sentiment.articles || [];
+  renderSentimentSummary(data.sentiment);
+  renderBreakdown(data.sentiment);
+  renderMentioned(data.sentiment);
+  renderImpact(data.sentiment);
+  filterNews();
+}
+
+function filterNews() {
+  const filter = document.getElementById("filter-sent").value;
+  let arts = allArticles;
+  if (filter !== "ALL") {
+    arts = arts.filter(a => {
+      const s = (a.sentiment||"").toUpperCase();
+      if (filter==="BULLISH") return s.includes("BULL")||s.includes("POS");
+      if (filter==="BEARISH") return s.includes("BEAR")||s.includes("NEG");
+      if (filter==="NEUTRAL") return s.includes("NEU");
+      return true;
+    });
+  }
+  document.getElementById("shown-news").textContent = `${arts.length} articles`;
+  document.getElementById("news-list").innerHTML = arts.slice(0,30).map(a => {
+    const s    = (a.sentiment||"neutral").toLowerCase();
+    const bull = s.includes("bull")||s.includes("pos");
+    const bear = s.includes("bear")||s.includes("neg");
+    const cls  = bull?"bull":bear?"bear":"neut";
+    const bCls = bull?"sent-pos":bear?"sent-neg":"sent-neu";
+    const bTxt = bull?"BULLISH":bear?"BEARISH":"NEUTRAL";
+    const score= a.score !== undefined ? Math.abs(a.score).toFixed(2) : null;
+    const age  = a.published_at ? timeAgo(a.published_at) : "";
+    return `<div class="news-card ${cls}" onclick="window.open('${a.url||"#"}','_blank')">
+      <div class="news-title">${a.title||"Untitled"}</div>
+      <div class="news-meta">
+        <span class="news-src">${a.source||"Unknown"}</span>
+        ${age ? `<span class="news-age">${age}</span>` : ""}
+        <span class="sent-badge ${bCls}">${bTxt}</span>
+        ${score ? `<span class="dim" style="font-size:9px">Score: ${score}</span>` : ""}
+      </div>
+      ${score ? `<div class="sent-bar"><div class="sent-fill" style="width:${Math.min(score*100,100)}%;background:${bull?"var(--green)":bear?"var(--red)":"var(--txt-3)"}"></div></div>` : ""}
+    </div>`;
+  }).join("") || `<div class="card" style="color:var(--txt-3);text-align:center;padding:20px">No articles match filter</div>`;
+}
+
+function renderSentimentSummary(s) {
+  const score  = s.composite_score ?? s.score ?? 0;
+  const mood   = score > 0.1 ? "🐂 Bullish" : score < -0.1 ? "🐻 Bearish" : "😐 Neutral";
+  const arts   = s.articles || [];
+  const bull   = arts.filter(a => { const x=(a.sentiment||"").toLowerCase(); return x.includes("bull")||x.includes("pos"); }).length;
+  const bear   = arts.filter(a => { const x=(a.sentiment||"").toLowerCase(); return x.includes("bear")||x.includes("neg"); }).length;
+  document.getElementById("sent-mood").textContent  = mood;
+  document.getElementById("sent-bull").textContent  = bull;
+  document.getElementById("sent-bear").textContent  = bear;
+  document.getElementById("sent-avg").textContent   = score.toFixed(3);
+  document.getElementById("sent-total").textContent = arts.length;
+}
+
+function renderBreakdown(s) {
+  const arts = s.articles || [];
+  const bull = arts.filter(a => { const x=(a.sentiment||"").toLowerCase(); return x.includes("bull")||x.includes("pos"); }).length;
+  const bear = arts.filter(a => { const x=(a.sentiment||"").toLowerCase(); return x.includes("bear")||x.includes("neg"); }).length;
+  const neu  = arts.length - bull - bear;
+  const total= arts.length || 1;
+  document.getElementById("sent-breakdown").innerHTML = [
+    ["Bullish", bull, total, "var(--green)"],
+    ["Bearish", bear, total, "var(--red)"],
+    ["Neutral", neu,  total, "var(--txt-3)"],
+  ].map(([lbl,n,t,col]) => `
+    <div>
+      <div style="display:flex;justify-content:space-between;margin-bottom:4px">
+        <span class="dim" style="font-size:11px">${lbl}</span>
+        <span class="mono" style="font-size:11px;color:${col}">${n} (${Math.round(n/t*100)}%)</span>
+      </div>
+      <div style="height:3px;background:var(--bg-4);border-radius:2px">
+        <div style="width:${Math.round(n/t*100)}%;height:100%;background:${col};border-radius:2px;transition:width .6s"></div>
+      </div>
+    </div>
+  `).join("");
+}
+
+function renderMentioned(s) {
+  const counts = {};
+  (s.articles||[]).forEach(a => {
+    (a.symbols||[]).forEach(sym => { counts[sym]=(counts[sym]||0)+1; });
+  });
+  const sorted = Object.entries(counts).sort((a,b)=>b[1]-a[1]).slice(0,8);
+  document.getElementById("top-mentioned").innerHTML = sorted.length ?
+    sorted.map(([sym,n]) => `
+      <div style="display:flex;justify-content:space-between;align-items:center;padding:4px 0;border-bottom:1px solid var(--border)">
+        <span class="mono" style="font-size:12px;font-weight:600">${sym}</span>
+        <span class="dim" style="font-size:11px">${n} article${n>1?"s":""}</span>
+      </div>`).join("") :
+    `<div style="color:var(--txt-3);font-size:11px">No symbol mentions tracked</div>`;
+}
+
+function renderImpact(s) {
+  const events = s.high_impact || s.events || [];
+  document.getElementById("impact-list").innerHTML = events.length ?
+    events.slice(0,5).map(e => `
+      <div style="padding:8px 10px;background:var(--bg-3);border-radius:5px;border-left:2px solid var(--gold)">
+        <div style="font-size:11px;font-weight:600;color:var(--txt);margin-bottom:2px">${e.title||e.event||"Event"}</div>
+        <div style="font-size:10px;color:var(--txt-3)">${e.impact||""} ${e.time||""}</div>
+      </div>`).join("") :
+    `<div style="color:var(--txt-3);font-size:11px">No high-impact events detected</div>`;
+}
+
+function timeAgo(ts) {
+  const d = new Date(ts), now = new Date();
+  const diff = Math.floor((now - d) / 60000);
+  if (diff < 1)   return "just now";
+  if (diff < 60)  return `${diff}m ago`;
+  if (diff < 1440)return `${Math.floor(diff/60)}h ago`;
+  return `${Math.floor(diff/1440)}d ago`;
+}
+
+loadNews();
+setInterval(loadNews, 120000);
+</script>
+{% endblock %}

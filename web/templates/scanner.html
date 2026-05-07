@@ -1,0 +1,229 @@
+{% extends "base.html" %}
+{% block title %}Signal Scanner — AI Trading Agent{% endblock %}
+
+{% block content %}
+<div class="page-hd">
+  <div>
+    <div class="page-title">Signal Scanner</div>
+    <div class="page-sub">Multi-symbol AI signals · Confidence · Regime · Session · <span class="live"></span> Live</div>
+  </div>
+  <div class="page-actions">
+    <select class="sel" id="filter-action" onchange="applyFilter()">
+      <option value="ALL">All Signals</option>
+      <option value="BUY">BUY / CALL</option>
+      <option value="SELL">SELL / PUT</option>
+      <option value="HOLD">HOLD</option>
+    </select>
+    <select class="sel" id="filter-regime" onchange="applyFilter()">
+      <option value="ALL">All Regimes</option>
+      <option value="TRENDING_UP">Trending ↑</option>
+      <option value="TRENDING_DOWN">Trending ↓</option>
+      <option value="RANGING">Ranging</option>
+      <option value="VOLATILE">Volatile</option>
+    </select>
+    <select class="sel" id="filter-conf" onchange="applyFilter()">
+      <option value="0">Any Confidence</option>
+      <option value="55">≥ 55%</option>
+      <option value="60">≥ 60%</option>
+      <option value="70">≥ 70%</option>
+    </select>
+    <button class="btn btn-ghost btn-sm" onclick="loadAll()">↻ Refresh</button>
+    <span class="dim mono" id="scan-time" style="font-size:11px">—</span>
+  </div>
+</div>
+
+<!-- Summary KPIs -->
+<div class="kpi-row" style="grid-template-columns:repeat(5,1fr);margin-bottom:18px" id="scan-kpis">
+  <div class="kpi"><div class="kpi-lbl">Total Scanned</div><div class="kpi-val" id="k-total">—</div></div>
+  <div class="kpi"><div class="kpi-lbl">BUY Signals</div><div class="kpi-val up" id="k-buy">—</div></div>
+  <div class="kpi"><div class="kpi-lbl">SELL Signals</div><div class="kpi-val dn" id="k-sell">—</div></div>
+  <div class="kpi"><div class="kpi-lbl">Avg Confidence</div><div class="kpi-val" id="k-conf">—</div></div>
+  <div class="kpi"><div class="kpi-lbl">High Conf (≥60%)</div><div class="kpi-val" id="k-hconf">—</div></div>
+</div>
+
+<!-- Scanner table -->
+<div class="card">
+  <div class="card-hd">
+    All Markets
+    <div style="display:flex;gap:6px;align-items:center">
+      <input class="inp" id="search-sym" placeholder="Search symbol…" oninput="applyFilter()"
+             style="width:160px;padding:4px 10px;font-size:11px">
+      <span class="dim" id="shown-count" style="font-size:10px"></span>
+    </div>
+  </div>
+  <div class="tbl-wrap">
+    <table id="scan-table">
+      <thead>
+        <tr>
+          <th onclick="sortBy('sym')" style="cursor:pointer">Symbol ↕</th>
+          <th>Price</th>
+          <th onclick="sortBy('action')" style="cursor:pointer">Signal ↕</th>
+          <th onclick="sortBy('conf')" style="cursor:pointer">Confidence ↕</th>
+          <th>Regime</th>
+          <th>RSI</th>
+          <th>ADX</th>
+          <th>MACD</th>
+          <th>Session</th>
+          <th>Timing</th>
+          <th>Entry</th>
+          <th>SL</th>
+          <th>Target</th>
+        </tr>
+      </thead>
+      <tbody id="scan-tbody">
+        <tr><td colspan="13" style="text-align:center;padding:40px;color:var(--txt-3)">
+          <div style="display:flex;align-items:center;justify-content:center;gap:8px">
+            <div class="spin"></div> Scanning markets…
+          </div>
+        </td></tr>
+      </tbody>
+    </table>
+  </div>
+</div>
+{% endblock %}
+
+{% block extra_js %}
+<script>
+const ALL_SYMS = [
+  "NIFTY50","BANKNIFTY","NIFTYIT","SENSEX","FINNIFTY",
+  "GOLD","SILVER","CRUDEOIL","COPPER","NATURALGAS",
+  "BTC","ETH","SOL","BNB","XRP",
+  "USDINR","EURUSD","GBPUSD",
+  "RELIANCE","TCS","HDFCBANK","INFY","ICICIBANK",
+  "SBIN","WIPRO","AXISBANK","KOTAKBANK","LT",
+  "BAJFINANCE","MARUTI","SUNPHARMA","BHARTIARTL","TATASTEEL"
+];
+
+const REGIME_CLS = { TRENDING_UP:"r-up", TRENDING_DOWN:"r-dn", RANGING:"r-rg", VOLATILE:"r-vl" };
+const REGIME_LBL = { TRENDING_UP:"📈 Trending ↑", TRENDING_DOWN:"📉 Trending ↓", RANGING:"↔ Ranging", VOLATILE:"⚡ Volatile" };
+
+let allRows = [], sortCol = "conf", sortDir = -1;
+let latestPrices = {};
+
+window.addEventListener("prices", e => { latestPrices = e.detail.prices; });
+
+async function loadAll() {
+  document.getElementById("scan-tbody").innerHTML =
+    `<tr><td colspan="13" style="text-align:center;padding:40px;color:var(--txt-3)">
+      <div style="display:flex;align-items:center;justify-content:center;gap:8px">
+        <div class="spin"></div> Scanning ${ALL_SYMS.length} symbols…
+      </div></td></tr>`;
+
+  const chunk = 10;
+  allRows = [];
+  for (let i = 0; i < ALL_SYMS.length; i += chunk) {
+    const syms = ALL_SYMS.slice(i, i+chunk).join(",");
+    const data = await api(`/api/signals?symbols=${syms}`);
+    if (data.ok) {
+      for (const [sym, s] of Object.entries(data.signals)) {
+        allRows.push({ sym, ...s });
+      }
+    }
+    applyFilter();
+  }
+  document.getElementById("scan-time").textContent = "Updated " + new Date().toLocaleTimeString();
+  updateKPIs();
+}
+
+function updateKPIs() {
+  const buy  = allRows.filter(r => { const a=(r.recommended_instrument||r.action||"").toUpperCase(); return a.includes("BUY")||a.includes("CALL"); }).length;
+  const sell = allRows.filter(r => { const a=(r.recommended_instrument||r.action||"").toUpperCase(); return a.includes("SELL")||a.includes("PUT"); }).length;
+  const confs = allRows.map(r => (r.confidence||0.5)*100);
+  const avg  = confs.length ? (confs.reduce((a,b)=>a+b,0)/confs.length).toFixed(1) : "—";
+  const hc   = confs.filter(c => c >= 60).length;
+  document.getElementById("k-total").textContent = allRows.length;
+  document.getElementById("k-buy").textContent   = buy;
+  document.getElementById("k-sell").textContent  = sell;
+  document.getElementById("k-conf").textContent  = avg + "%";
+  document.getElementById("k-hconf").textContent = hc;
+}
+
+function applyFilter() {
+  const action = document.getElementById("filter-action").value;
+  const regime = document.getElementById("filter-regime").value;
+  const minConf = parseInt(document.getElementById("filter-conf").value) || 0;
+  const search  = (document.getElementById("search-sym").value||"").toUpperCase();
+
+  let rows = allRows.filter(r => {
+    const rec = (r.recommended_instrument||r.action||"HOLD").toUpperCase();
+    const isBuy  = rec.includes("BUY")||rec.includes("CALL");
+    const isSell = rec.includes("SELL")||rec.includes("PUT");
+    if (action === "BUY"  && !isBuy)  return false;
+    if (action === "SELL" && !isSell) return false;
+    if (action === "HOLD" && (isBuy||isSell)) return false;
+    if (regime !== "ALL" && r.regime !== regime) return false;
+    if ((r.confidence||0.5)*100 < minConf) return false;
+    if (search && !r.sym.includes(search)) return false;
+    return true;
+  });
+
+  // Sort
+  rows.sort((a, b) => {
+    if (sortCol === "sym")    return sortDir * a.sym.localeCompare(b.sym);
+    if (sortCol === "conf")   return sortDir * ((b.confidence||0.5) - (a.confidence||0.5));
+    if (sortCol === "action") return sortDir * (a.recommended_instrument||a.action||"").localeCompare(b.recommended_instrument||b.action||"");
+    return 0;
+  });
+
+  document.getElementById("shown-count").textContent = `${rows.length} of ${allRows.length}`;
+  renderTable(rows);
+}
+
+function sortBy(col) {
+  if (sortCol === col) sortDir *= -1; else { sortCol = col; sortDir = -1; }
+  applyFilter();
+}
+
+function renderTable(rows) {
+  if (!rows.length) {
+    document.getElementById("scan-tbody").innerHTML =
+      `<tr><td colspan="13" style="text-align:center;padding:24px;color:var(--txt-3)">No signals match filters</td></tr>`;
+    return;
+  }
+  document.getElementById("scan-tbody").innerHTML = rows.map(r => {
+    const rec   = (r.recommended_instrument||r.action||"HOLD").toUpperCase();
+    const conf  = Math.round((r.confidence||0.5)*100);
+    const isBuy = rec.includes("BUY")||rec.includes("CALL");
+    const isSell= rec.includes("SELL")||rec.includes("PUT");
+    const aCls  = isBuy?"up":isSell?"dn":"";
+    const rCls  = REGIME_CLS[r.regime||""]||"r-rg";
+    const rLbl  = REGIME_LBL[r.regime||""]||(r.regime||"—").replace(/_/g," ");
+    // Use live WebSocket price for consistency // SCANNER_LIVE_PRICE_PATCHED
+    const wsInfo = latestPrices[r.sym];
+    const px = wsInfo ? fmtDisplay(r.sym, wsInfo.display, wsInfo.label) :
+               r.price ? `₹${(r.price).toLocaleString("en-IN",{maximumFractionDigits:2})}` : "—";
+    const rsi   = r.rsi ? parseFloat(r.rsi).toFixed(1) : "—";
+    const rsiCls= r.rsi ? (r.rsi>70?"dn":r.rsi<30?"up":"") : "";
+    const adx   = r.adx ? parseFloat(r.adx).toFixed(1) : "—";
+    const macd  = r.macd_signal ? `<span class="${r.macd_signal==='bullish'?'up':'dn'}">${r.macd_signal}</span>` : "—";
+    const sl     = r.stop_loss   ? `₹${parseFloat(r.stop_loss).toLocaleString("en-IN",{maximumFractionDigits:0})}` : "—";
+    const target = r.target      ? `₹${parseFloat(r.target).toLocaleString("en-IN",{maximumFractionDigits:0})}` : "—";
+    return `<tr>
+      <td class="ui">${r.sym}</td>
+      <td>${px}</td>
+      <td class="${aCls}" style="font-weight:700;font-size:12px">${rec}</td>
+      <td>
+        <div style="display:flex;align-items:center;gap:6px">
+          <div style="width:50px;height:3px;background:var(--bg-4);border-radius:2px">
+            <div style="width:${conf}%;height:100%;background:${isBuy?"var(--green)":isSell?"var(--red)":"var(--txt-3)"};border-radius:2px"></div>
+          </div>
+          <span class="dim" style="font-size:10px">${conf}%</span>
+        </div>
+      </td>
+      <td><span class="regime ${rCls}">${rLbl}</span></td>
+      <td class="${rsiCls}">${rsi}</td>
+      <td>${adx}</td>
+      <td>${macd}</td>
+      <td class="dim" style="font-size:10px">${r.session_label||"—"}</td>
+      <td class="dim" style="font-size:10px">${r.entry_timing||"—"}</td>
+      <td class="up" style="font-size:10px">${r.entry||"—"}</td>
+      <td class="dn" style="font-size:10px">${sl}</td>
+      <td class="up" style="font-size:10px">${target}</td>
+    </tr>`;
+  }).join("");
+}
+
+loadAll();
+setInterval(loadAll, 60000);
+</script>
+{% endblock %}

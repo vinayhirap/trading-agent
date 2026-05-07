@@ -1,0 +1,272 @@
+{% extends "base.html" %}
+{% block title %}Regime Detector — AI Trading Agent{% endblock %}
+
+{% block extra_css %}
+.regime-hero{padding:20px 24px;border-radius:10px;border:1px solid transparent;margin-bottom:18px}
+.regime-hero.trending-up{background:rgba(0,232,122,.12);border-color:rgba(0,232,122,.3)}
+.regime-hero.trending-down{background:rgba(255,51,102,.12);border-color:rgba(255,51,102,.3)}
+.regime-hero.ranging{background:rgba(68,136,255,.1);border-color:rgba(68,136,255,.25)}
+.regime-hero.volatile{background:rgba(255,170,0,.1);border-color:rgba(255,170,0,.25)}
+.regime-name{font-size:28px;font-weight:800;letter-spacing:-.02em}
+.param-row{display:flex;justify-content:space-between;align-items:center;padding:7px 0;border-bottom:1px solid var(--border);font-size:11px}
+.param-row:last-child{border-bottom:none}
+.regime-mini{display:inline-flex;align-items:center;gap:4px;padding:3px 8px;border-radius:4px;font-size:9px;font-weight:700;letter-spacing:.06em}
+.r-mini-up{background:rgba(0,232,122,.12);color:var(--green)}
+.r-mini-dn{background:rgba(255,51,102,.12);color:var(--red)}
+.r-mini-rg{background:rgba(68,136,255,.1);color:var(--blue)}
+.r-mini-vl{background:rgba(255,170,0,.1);color:var(--gold)}
+.conf-ring{width:80px;height:80px;border-radius:50%;display:flex;align-items:center;justify-content:center;flex-direction:column;border:3px solid var(--border)}
+{% endblock %}
+
+{% block content %}
+<div class="page-hd">
+  <div>
+    <div class="page-title">🔭 Regime Detector</div>
+    <div class="page-sub">HMM + Rule-based market regime · Signal gating · 4-state model</div>
+  </div>
+  <div class="page-actions">
+    <select class="sel" id="reg-sym" onchange="loadRegime()">
+      {% for sym in ["NIFTY50","BANKNIFTY","NIFTYIT","GOLD","SILVER","CRUDEOIL","BTC","ETH","RELIANCE","TCS","HDFCBANK"] %}
+      <option>{{ sym }}</option>
+      {% endfor %}
+    </select>
+    <button class="btn btn-ghost btn-sm" onclick="loadRegime()">↻ Refresh</button>
+    <span class="dim mono" id="reg-time" style="font-size:11px">—</span>
+  </div>
+</div>
+
+<!-- Current regime hero -->
+<div id="regime-hero" class="regime-hero ranging">
+  <div style="display:flex;align-items:center;gap:20px">
+    <div style="flex:1">
+      <div style="font-size:10px;font-weight:700;letter-spacing:.1em;opacity:.7;margin-bottom:6px">CURRENT REGIME</div>
+      <div class="regime-name" id="reg-name">Loading…</div>
+      <div style="font-size:13px;margin-top:6px;opacity:.8" id="reg-desc">Detecting market regime…</div>
+      <div style="display:flex;gap:12px;margin-top:12px">
+        <div><div style="font-size:9px;opacity:.7;margin-bottom:2px">SIGNAL MULTIPLIER</div><div style="font-family:var(--mono-font);font-size:16px;font-weight:700" id="reg-sig-mult">—</div></div>
+        <div><div style="font-size:9px;opacity:.7;margin-bottom:2px">SIZE MULTIPLIER</div><div style="font-family:var(--mono-font);font-size:16px;font-weight:700" id="reg-size-mult">—</div></div>
+        <div><div style="font-size:9px;opacity:.7;margin-bottom:2px">SL MULTIPLIER</div><div style="font-family:var(--mono-font);font-size:16px;font-weight:700" id="reg-sl-mult">—</div></div>
+      </div>
+    </div>
+    <div class="conf-ring" id="conf-ring">
+      <div style="font-family:var(--mono-font);font-size:18px;font-weight:700" id="reg-conf">—</div>
+      <div style="font-size:8px;opacity:.7">CONFIDENCE</div>
+    </div>
+    <div>
+      <div style="font-size:9px;opacity:.7;margin-bottom:6px">METHOD</div>
+      <div style="font-size:11px;font-weight:600" id="reg-method">—</div>
+      <div style="font-size:9px;opacity:.7;margin-top:10px;margin-bottom:4px">VERDICT</div>
+      <div style="font-size:12px;font-weight:700" id="reg-verdict">—</div>
+    </div>
+  </div>
+</div>
+
+<!-- KPI row -->
+<div class="kpi-row" style="grid-template-columns:repeat(5,1fr);margin-bottom:18px">
+  <div class="kpi"><div class="kpi-lbl">ADX</div><div class="kpi-val" id="k-adx">—</div></div>
+  <div class="kpi"><div class="kpi-lbl">RSI 14</div><div class="kpi-val" id="k-rsi">—</div></div>
+  <div class="kpi"><div class="kpi-lbl">ATR %</div><div class="kpi-val" id="k-atr">—</div></div>
+  <div class="kpi"><div class="kpi-lbl">BB Width</div><div class="kpi-val" id="k-bb">—</div></div>
+  <div class="kpi"><div class="kpi-lbl">Vol Ratio</div><div class="kpi-val" id="k-vol">—</div></div>
+</div>
+
+<div class="g2">
+  <!-- Signal gate simulator -->
+  <div class="card">
+    <div class="card-hd">Signal Gate Simulator</div>
+    <div style="font-size:11px;color:var(--txt-2);margin-bottom:12px">See how the current regime adjusts any signal before execution</div>
+
+    <div class="fg">
+      <label class="lbl">Input Signal</label>
+      <select class="sel" style="width:100%" id="gate-signal" onchange="runGate()">
+        <option value="BUY">BUY</option>
+        <option value="SELL">SELL</option>
+        <option value="HOLD">HOLD</option>
+        <option value="STRONG BUY">STRONG BUY</option>
+        <option value="STRONG SELL">STRONG SELL</option>
+      </select>
+    </div>
+    <div class="fg">
+      <label class="lbl">Input Confidence (%)</label>
+      <input class="inp" id="gate-conf" type="range" min="40" max="95" value="65" oninput="document.getElementById('gate-conf-val').textContent=this.value+'%';runGate()">
+      <div style="font-family:var(--mono-font);font-size:12px;margin-top:4px" id="gate-conf-val">65%</div>
+    </div>
+
+    <div id="gate-result" style="padding:12px;background:var(--bg-3);border-radius:6px">
+      <div style="color:var(--txt-3);font-size:11px">Select symbol and wait for regime detection…</div>
+    </div>
+  </div>
+
+  <!-- All-symbol scanner -->
+  <div class="card">
+    <div class="card-hd">
+      All-Symbol Regime Scanner
+      <button class="btn btn-ghost btn-sm" onclick="scanAll()">Scan All →</button>
+    </div>
+    <div id="regime-scanner" style="display:flex;flex-direction:column;gap:4px;max-height:360px;overflow-y:auto">
+      <div style="color:var(--txt-3);font-size:11px;text-align:center;padding:20px">Click "Scan All" to detect regimes across all symbols</div>
+    </div>
+  </div>
+</div>
+
+<!-- Regime guide -->
+<div class="card" style="margin-top:14px">
+  <div class="card-hd">Regime Playbook — What to do in each regime</div>
+  <div style="display:grid;grid-template-columns:repeat(4,1fr);gap:10px">
+    {% for regime, cls, icon, strategies, avoid in [
+      ("TRENDING UP","r-mini-up","📈",["Trend following entries","Buy breakouts","Hold winners longer","Wider stops"],["Mean reversion shorts","Counter-trend trades"]),
+      ("TRENDING DOWN","r-mini-dn","📉",["Short breakdowns","Sell rallies","Tight stops on longs","Defensive hedges"],["Buying dips blindly","New longs without confirmation"]),
+      ("RANGING","r-mini-rg","↔","Buy support / sell resistance","Bollinger band mean reversion","Tighter profit targets","Avoid breakout trades"],["Trend following","Wide stops"]),
+      ("VOLATILE","r-mini-vl","⚡",["Reduce position size","Wait for confirmation","Use wider ATR stops","News-driven momentum"],["Normal-size positions","Breakout trades without confirmation"]),
+    ] %}
+    <div style="background:var(--bg-3);border-radius:6px;padding:12px">
+      <div style="font-size:13px;margin-bottom:8px">{{ icon }} <span class="regime-mini {{ cls }}">{{ regime }}</span></div>
+      <div style="font-size:10px;font-weight:700;color:var(--green);margin-bottom:4px;letter-spacing:.04em">DO</div>
+      {% if strategies is iterable and strategies is not string %}
+      {% for s in strategies %}<div style="font-size:10px;color:var(--txt-2);margin-bottom:2px">✅ {{ s }}</div>{% endfor %}
+      {% else %}
+      <div style="font-size:10px;color:var(--txt-2);margin-bottom:2px">✅ {{ strategies }}</div>
+      {% endif %}
+      <div style="font-size:10px;font-weight:700;color:var(--red);margin-top:8px;margin-bottom:4px;letter-spacing:.04em">AVOID</div>
+      {% for a in avoid %}<div style="font-size:10px;color:var(--txt-2);margin-bottom:2px">❌ {{ a }}</div>{% endfor %}
+    </div>
+    {% endfor %}
+  </div>
+</div>
+{% endblock %}
+
+{% block extra_js %}
+<script>
+let currentRegime = null;
+const REGIME_CSS  = { TRENDING_UP:"trending-up", TRENDING_DOWN:"trending-down", RANGING:"ranging", VOLATILE:"volatile" };
+const REGIME_COL  = { TRENDING_UP:"var(--green)", TRENDING_DOWN:"var(--red)", RANGING:"var(--blue)", VOLATILE:"var(--gold)" };
+const REGIME_MINI = { TRENDING_UP:"r-mini-up", TRENDING_DOWN:"r-mini-dn", RANGING:"r-mini-rg", VOLATILE:"r-mini-vl" };
+const REGIME_DESC = {
+  TRENDING_UP:   "Strong uptrend — EMA stack aligned, ADX>24. Trend-following works. Let winners run.",
+  TRENDING_DOWN: "Strong downtrend — price below EMAs, ADX>24. Sell rallies. Tight stops on longs.",
+  RANGING:       "Sideways market — low ADX, price oscillating. Mean reversion strategies work best.",
+  VOLATILE:      "Elevated volatility — ATR spike or choppy price action. Reduce size. Wait for clarity.",
+};
+const REGIME_PARAMS = {
+  TRENDING_UP:   { sig:1.0, size:1.0, sl:1.0 },
+  TRENDING_DOWN: { sig:0.7, size:0.7, sl:0.8 },
+  RANGING:       { sig:0.85, size:0.85, sl:0.9 },
+  VOLATILE:      { sig:0.6, size:0.6, sl:1.3 },
+};
+
+async function loadRegime() {
+  const sym  = document.getElementById("reg-sym").value;
+  const data = await api(`/api/regime?symbol=${sym}`);
+  document.getElementById("reg-time").textContent = "Updated " + new Date().toLocaleTimeString();
+
+  if (!data.ok) { toast("Regime data unavailable","inf"); return; }
+
+  const r = data.regime;
+  currentRegime = r;
+  renderHero(r);
+  renderKPIs(r);
+  runGate();
+}
+
+function renderHero(r) {
+  const regime = (r.regime||"RANGING").toUpperCase().replace(" ","_");
+  const cls    = REGIME_CSS[regime] || "ranging";
+  const col    = REGIME_COL[regime] || "var(--blue)";
+  const params = REGIME_PARAMS[regime] || { sig:1.0, size:1.0, sl:1.0 };
+  const conf   = Math.round((r.confidence||0.5)*100);
+
+  document.getElementById("regime-hero").className = "regime-hero " + cls;
+  document.getElementById("reg-name").textContent    = (r.regime||"RANGING").replace(/_/g," ");
+  document.getElementById("reg-desc").textContent    = REGIME_DESC[regime] || "";
+  document.getElementById("reg-sig-mult").textContent= params.sig.toFixed(2) + "×";
+  document.getElementById("reg-size-mult").textContent= params.size.toFixed(2) + "×";
+  document.getElementById("reg-sl-mult").textContent = params.sl.toFixed(2) + "×";
+  document.getElementById("reg-conf").textContent   = conf + "%";
+  document.getElementById("reg-method").textContent  = r.method || "Rule-based";
+  document.getElementById("reg-verdict").textContent = r.trade_verdict || (regime === "TRENDING_UP" ? "TRADE LONG" : regime === "TRENDING_DOWN" ? "TRADE SHORT" : "CAUTION");
+
+  const ring = document.getElementById("conf-ring");
+  ring.style.borderColor = col;
+}
+
+function renderKPIs(r) {
+  const f = r.features || {};
+  const setKpi = (id, v, decimals=1, suffix="") => {
+    const el = document.getElementById(id); if (!el) return;
+    el.textContent = v !== null && v !== undefined ? v.toFixed(decimals) + suffix : "—";
+  };
+  const adx = f.adx || r.adx || 0;
+  const rsi = f.rsi_14 || r.rsi || 0;
+  const atr = f.atr_pct ? f.atr_pct*100 : 0;
+  const bb  = f.bb_width || 0;
+  const vol = f.vol_ratio || 0;
+
+  const adxEl = document.getElementById("k-adx");
+  adxEl.textContent = adx.toFixed(1);
+  adxEl.className = "kpi-val " + (adx > 25 ? "up" : adx < 18 ? "dn" : "");
+
+  const rsiEl = document.getElementById("k-rsi");
+  rsiEl.textContent = rsi.toFixed(1);
+  rsiEl.className = "kpi-val " + (rsi > 60 ? "up" : rsi < 40 ? "dn" : "");
+
+  document.getElementById("k-atr").textContent = atr.toFixed(2) + "%";
+  document.getElementById("k-bb").textContent  = bb.toFixed(3);
+  document.getElementById("k-vol").textContent = vol.toFixed(2) + "×";
+}
+
+function runGate() {
+  const signal = document.getElementById("gate-signal").value;
+  const confIn = parseInt(document.getElementById("gate-conf").value) / 100;
+
+  if (!currentRegime) {
+    document.getElementById("gate-result").innerHTML = `<div style="color:var(--txt-3);font-size:11px">Load regime first</div>`;
+    return;
+  }
+
+  const regime = (currentRegime.regime||"RANGING").toUpperCase().replace(" ","_");
+  const params  = REGIME_PARAMS[regime] || { sig:1.0, size:1.0, sl:1.0 };
+  const adjConf = Math.min(0.99, confIn * params.sig);
+  const isBuy   = signal.includes("BUY");
+  const isSell  = signal.includes("SELL");
+  const gate    = adjConf >= 0.55 ? (isBuy || isSell ? "PASS" : "HOLD") : "HOLD";
+  const gateCol = gate === "PASS" ? "var(--green)" : "var(--gold)";
+
+  document.getElementById("gate-result").innerHTML = `
+    <div style="display:grid;grid-template-columns:1fr 1fr;gap:10px;margin-bottom:10px">
+      <div><div class="kpi-lbl">Input Signal</div><div class="${isBuy?"up":isSell?"dn":""}" style="font-size:16px;font-weight:700">${signal}</div></div>
+      <div><div class="kpi-lbl">Gate Result</div><div style="font-size:16px;font-weight:700;color:${gateCol}">${gate}</div></div>
+      <div><div class="kpi-lbl">Conf In → Out</div><div style="font-family:var(--mono-font);font-size:13px">${(confIn*100).toFixed(0)}% → <span style="color:${gateCol}">${(adjConf*100).toFixed(0)}%</span></div></div>
+      <div><div class="kpi-lbl">Size Multiplier</div><div style="font-family:var(--mono-font);font-size:13px">${params.size.toFixed(2)}×</div></div>
+    </div>
+    <div style="font-size:10px;color:var(--txt-3);padding:6px 8px;background:var(--bg-4);border-radius:4px">
+      ${gate === "PASS" ? `✅ Signal passes regime gate. Trade with ${(params.size*100).toFixed(0)}% of normal position size. SL multiplier: ${params.sl.toFixed(2)}×` : `⏸ Signal held — adjusted confidence ${(adjConf*100).toFixed(0)}% below 55% gate. Wait for stronger setup in ${regime.replace(/_/g," ")} regime.`}
+    </div>`;
+}
+
+async function scanAll() {
+  const syms = ["NIFTY50","BANKNIFTY","NIFTYIT","GOLD","SILVER","CRUDEOIL","BTC","ETH","RELIANCE","TCS","HDFCBANK","INFY","ICICIBANK","SBIN"];
+  document.getElementById("regime-scanner").innerHTML = `<div style="text-align:center;padding:20px;color:var(--txt-3)"><div class="spin" style="display:inline-block"></div> Scanning ${syms.length} symbols…</div>`;
+
+  const results = [];
+  for (const sym of syms) {
+    const data = await api(`/api/regime?symbol=${sym}`);
+    if (data.ok && data.regime) results.push({ sym, ...data.regime });
+  }
+
+  document.getElementById("regime-scanner").innerHTML = results.map(r => {
+    const regime = (r.regime||"RANGING").toUpperCase().replace(" ","_");
+    const cls    = REGIME_MINI[regime] || "r-mini-rg";
+    const conf   = Math.round((r.confidence||0.5)*100);
+    return `<div style="display:flex;align-items:center;gap:10px;padding:6px 8px;border-bottom:1px solid var(--border)">
+      <span style="font-size:12px;font-weight:700;color:var(--txt);min-width:80px">${r.sym}</span>
+      <span class="regime-mini ${cls}">${(r.regime||"RANGING").replace(/_/g," ")}</span>
+      <span class="dim" style="font-size:10px;margin-left:auto">${conf}% conf</span>
+      <span class="dim" style="font-size:9px">${r.method||"rule"}</span>
+    </div>`;
+  }).join("") || `<div style="color:var(--txt-3);font-size:11px;text-align:center;padding:20px">No regime data</div>`;
+}
+
+loadRegime();
+setInterval(loadRegime, 60000);
+</script>
+{% endblock %}

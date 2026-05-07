@@ -1,0 +1,278 @@
+{% extends "base.html" %}
+{% block title %}Trade — AI Trading Agent{% endblock %}
+
+{% block extra_css %}
+.trade-side-btn{flex:1;padding:10px;border-radius:6px;font-size:13px;font-weight:700;cursor:pointer;border:2px solid transparent;transition:all .2s}
+.trade-side-btn.buy-btn{background:var(--green-dim);color:var(--green);border-color:rgba(0,232,122,.3)}
+.trade-side-btn.buy-btn.active,.trade-side-btn.buy-btn:hover{background:var(--green);color:#000;border-color:var(--green)}
+.trade-side-btn.sell-btn{background:var(--red-dim);color:var(--red);border-color:rgba(255,51,102,.3)}
+.trade-side-btn.sell-btn.active,.trade-side-btn.sell-btn:hover{background:var(--red);color:#fff;border-color:var(--red)}
+.order-row{display:flex;justify-content:space-between;padding:8px 0;border-bottom:1px solid var(--border);font-size:11px}
+.order-row:last-child{border-bottom:none}
+{% endblock %}
+
+{% block content %}
+<div class="page-hd">
+  <div><div class="page-title">Trade Execution</div>
+  <div class="page-sub">Paper trading · AI signal-assisted · Risk-managed</div></div>
+</div>
+
+<div class="g2" style="align-items:start">
+  <!-- Order form -->
+  <div class="card">
+    <div class="card-hd">New Order</div>
+
+    <!-- Buy / Sell toggle -->
+    <div style="display:flex;gap:8px;margin-bottom:16px">
+      <button class="trade-side-btn buy-btn active" id="btn-buy" onclick="setSide('BUY')">▲ BUY / LONG</button>
+      <button class="trade-side-btn sell-btn" id="btn-sell" onclick="setSide('SELL')">▼ SELL / SHORT</button>
+    </div>
+
+    <div class="fg">
+      <label class="lbl">Symbol</label>
+      <select class="sel" id="t-sym" style="width:100%" onchange="onSymChange()">
+        <optgroup label="Indices">
+          {% for s in ["NIFTY50","BANKNIFTY","NIFTYIT","SENSEX"] %}<option>{{ s }}</option>{% endfor %}
+        </optgroup>
+        <optgroup label="MCX Commodities">
+          {% for s in ["GOLD","SILVER","CRUDEOIL","COPPER","NATURALGAS"] %}<option>{{ s }}</option>{% endfor %}
+        </optgroup>
+        <optgroup label="Crypto">
+          {% for s in ["BTC","ETH","SOL","BNB","XRP"] %}<option>{{ s }}</option>{% endfor %}
+        </optgroup>
+        <optgroup label="Equities">
+          {% for s in ["RELIANCE","TCS","HDFCBANK","INFY","ICICIBANK","SBIN","WIPRO","AXISBANK","KOTAKBANK","LT","BAJFINANCE","MARUTI","SUNPHARMA","BHARTIARTL","TATASTEEL"] %}<option>{{ s }}</option>{% endfor %}
+        </optgroup>
+      </select>
+    </div>
+
+    <div class="g2">
+      <div class="fg">
+        <label class="lbl">Price (₹)</label>
+        <input class="inp" id="t-price" type="number" placeholder="Market price" step="0.01">
+      </div>
+      <div class="fg">
+        <label class="lbl">Quantity</label>
+        <input class="inp" id="t-qty" type="number" placeholder="1" min="1" value="1">
+      </div>
+    </div>
+
+    <div class="g2">
+      <div class="fg">
+        <label class="lbl">Stop Loss (₹)</label>
+        <input class="inp" id="t-sl" type="number" placeholder="Auto (ATR)" step="0.01">
+      </div>
+      <div class="fg">
+        <label class="lbl">Target (₹)</label>
+        <input class="inp" id="t-target" type="number" placeholder="Auto (1.5× ATR)" step="0.01">
+      </div>
+    </div>
+
+    <!-- AI signal suggestion -->
+    <div id="ai-suggestion" style="background:var(--bg-3);border:1px solid var(--border);border-radius:6px;padding:10px 12px;margin-bottom:14px;display:none">
+      <div style="font-size:9px;font-weight:700;letter-spacing:.06em;color:var(--blue);margin-bottom:6px">⚡ AI SIGNAL SUGGESTION</div>
+      <div id="ai-sug-content" style="font-size:11px;color:var(--txt-2)"></div>
+    </div>
+
+    <!-- Order preview -->
+    <div style="background:var(--bg-3);border-radius:6px;padding:10px 12px;margin-bottom:14px">
+      <div class="kpi-lbl" style="margin-bottom:8px">Order Preview</div>
+      <div class="order-row"><span class="dim">Order Value</span><span class="mono" id="prev-value">—</span></div>
+      <div class="order-row"><span class="dim">Est. Charges</span><span class="mono dn" id="prev-charges">—</span></div>
+      <div class="order-row"><span class="dim">Risk (SL hit)</span><span class="mono dn" id="prev-risk">—</span></div>
+      <div class="order-row"><span class="dim">Reward (Target)</span><span class="mono up" id="prev-reward">—</span></div>
+      <div class="order-row"><span class="dim">R:R Ratio</span><span class="mono" id="prev-rr">—</span></div>
+    </div>
+
+    <button class="btn btn-primary" style="width:100%;justify-content:center;padding:12px" onclick="placeOrder()" id="place-btn">
+      Place Paper Order
+    </button>
+    <div id="order-result" style="margin-top:10px;display:none"></div>
+  </div>
+
+  <!-- Right panel -->
+  <div class="gap">
+    <!-- AI signal for selected symbol -->
+    <div class="card">
+      <div class="card-hd">AI Signal — <span id="signal-sym-lbl">NIFTY50</span></div>
+      <div id="trade-signal" style="color:var(--txt-3);font-size:12px">Loading…</div>
+    </div>
+
+    <!-- Risk rules -->
+    <div class="card">
+      <div class="card-hd">Active Risk Rules</div>
+      <div style="display:flex;flex-direction:column;gap:8px">
+        {% for rule in [
+          ("Daily Loss Limit","2% of portfolio — trading halts if hit","🛡️"),
+          ("Max Positions","2 per sector at any time","📊"),
+          ("Min Confidence","55% — below this, signal is HOLD","🎯"),
+          ("No Averaging Down","Cannot add to losing positions","🚫"),
+          ("Trailing Stop","Activates at +1%, steps 0.5%","📈"),
+        ] %}
+        <div style="display:flex;gap:8px;align-items:center;padding:6px 8px;background:var(--bg-3);border-radius:5px">
+          <span style="font-size:14px">{{ rule[2] }}</span>
+          <div>
+            <div style="font-size:11px;font-weight:600;color:var(--txt)">{{ rule[0] }}</div>
+            <div style="font-size:10px;color:var(--txt-3)">{{ rule[1] }}</div>
+          </div>
+        </div>
+        {% endfor %}
+      </div>
+    </div>
+
+    <!-- Recent orders -->
+    <div class="card">
+      <div class="card-hd">Recent Orders</div>
+      <div id="recent-orders">
+        <div style="color:var(--txt-3);font-size:11px;text-align:center;padding:12px">No orders yet</div>
+      </div>
+    </div>
+  </div>
+</div>
+{% endblock %}
+
+{% block extra_js %}
+<script>
+let currentSide = "BUY", recentOrders = [], currentPrices = {};
+
+window.addEventListener("prices", e => {
+  currentPrices = e.detail.prices;
+  const sym  = document.getElementById("t-sym").value;
+  const info = currentPrices[sym];
+  if (info && !document.getElementById("t-price").value) {
+    document.getElementById("t-price").placeholder = fmtDisplay(sym, info.display, info.label);
+  }
+  updatePreview();
+});
+
+function setSide(side) {
+  currentSide = side;
+  document.getElementById("btn-buy").classList.toggle("active", side==="BUY");
+  document.getElementById("btn-sell").classList.toggle("active", side==="SELL");
+  updatePreview();
+}
+
+async function onSymChange() {
+  const sym = document.getElementById("t-sym").value;
+  document.getElementById("signal-sym-lbl").textContent = sym;
+  document.getElementById("t-price").value = "";
+  document.getElementById("t-sl").value    = "";
+  document.getElementById("t-target").value= "";
+  await loadTradeSignal(sym);
+  updatePreview();
+}
+
+async function loadTradeSignal(sym) {
+  const data = await api(`/api/signals?symbols=${sym}`);
+  const el   = document.getElementById("trade-signal");
+  const sug  = document.getElementById("ai-suggestion");
+  const sugC = document.getElementById("ai-sug-content");
+  if (!data.ok || !data.signals[sym]) {
+    el.innerHTML = `<div style="color:var(--txt-3)">No signal data</div>`;
+    sug.style.display = "none"; return;
+  }
+  const s   = data.signals[sym];
+  const rec = (s.recommended_instrument||s.action||"HOLD").toUpperCase();
+  const conf= Math.round((s.confidence||0.5)*100);
+  const isBuy=rec.includes("BUY")||rec.includes("CALL");
+  const isSell=rec.includes("SELL")||rec.includes("PUT");
+  el.innerHTML = `
+    <div style="display:flex;align-items:center;gap:10px;margin-bottom:10px">
+      <span class="${isBuy?"up":isSell?"dn":""}" style="font-size:22px;font-weight:800">${rec}</span>
+      <span class="dim" style="font-size:11px">${conf}% confidence</span>
+    </div>
+    ${[["RSI",s.rsi?parseFloat(s.rsi).toFixed(1):"—"],["ADX",s.adx?parseFloat(s.adx).toFixed(1):"—"],
+       ["Regime",(s.regime||"—").replace(/_/g," ")],["Session",s.session_label||"—"],
+       ["Entry",s.entry?`₹${parseFloat(s.entry).toLocaleString("en-IN",{maximumFractionDigits:0})}`:"—"],
+       ["SL",s.stop_loss?`₹${parseFloat(s.stop_loss).toLocaleString("en-IN",{maximumFractionDigits:0})}`:"—"],
+       ["Target",s.target?`₹${parseFloat(s.target).toLocaleString("en-IN",{maximumFractionDigits:0})}`:"—"],
+      ].map(([k,v])=>`<div style="display:flex;justify-content:space-between;font-size:11px;padding:3px 0;border-bottom:1px solid var(--border)">
+        <span class="dim">${k}</span><span class="mono">${v}</span></div>`).join("")}
+  `;
+  // Auto-fill price/sl/target
+  if (s.entry && !document.getElementById("t-price").value)
+    document.getElementById("t-price").value = parseFloat(s.entry).toFixed(2);
+  if (s.stop_loss && !document.getElementById("t-sl").value)
+    document.getElementById("t-sl").value = parseFloat(s.stop_loss).toFixed(2);
+  if (s.target && !document.getElementById("t-target").value)
+    document.getElementById("t-target").value = parseFloat(s.target).toFixed(2);
+
+  if (conf >= 55 && (isBuy||isSell)) {
+    sug.style.display = "block";
+    sugC.textContent  = `Signal: ${rec} with ${conf}% confidence. ${isBuy?"Consider BUY order.":"Consider SELL order."} ${s.entry_timing||""}`;
+  } else { sug.style.display = "none"; }
+  updatePreview();
+}
+
+function updatePreview() {
+  const price  = parseFloat(document.getElementById("t-price").value) || 0;
+  const qty    = parseInt(document.getElementById("t-qty").value) || 1;
+  const sl     = parseFloat(document.getElementById("t-sl").value) || 0;
+  const target = parseFloat(document.getElementById("t-target").value) || 0;
+  if (!price) return;
+  const value   = price * qty;
+  const charges = Math.max(20, value * 0.0003);
+  const risk    = sl     ? Math.abs(price - sl)     * qty : 0;
+  const reward  = target ? Math.abs(target - price) * qty : 0;
+  const rr      = risk   ? (reward/risk).toFixed(2) : "—";
+  const fmt = v => `₹${v.toLocaleString("en-IN",{maximumFractionDigits:0})}`;
+  document.getElementById("prev-value").textContent   = fmt(value);
+  document.getElementById("prev-charges").textContent = fmt(charges);
+  document.getElementById("prev-risk").textContent    = risk   ? fmt(risk)   : "—";
+  document.getElementById("prev-reward").textContent  = reward ? fmt(reward) : "—";
+  document.getElementById("prev-rr").textContent      = rr + (rr!=="—"?" : 1":"");
+}
+
+async function placeOrder() {
+  const sym    = document.getElementById("t-sym").value;
+  const price  = parseFloat(document.getElementById("t-price").value);
+  const qty    = parseInt(document.getElementById("t-qty").value) || 1;
+  const sl     = parseFloat(document.getElementById("t-sl").value) || 0;
+  const target = parseFloat(document.getElementById("t-target").value) || 0;
+  if (!price || price <= 0) { toast("Enter a valid price","err"); return; }
+
+  const btn = document.getElementById("place-btn");
+  btn.disabled = true; btn.textContent = "Placing…";
+
+  const data = await api("/api/trade/execute", "POST", {
+    symbol: sym, side: currentSide, quantity: qty,
+    price, sl, target, signal: "MANUAL", confidence: 0.6,
+  });
+
+  btn.disabled = false; btn.textContent = "Place Paper Order";
+  const result = document.getElementById("order-result");
+  result.style.display = "block";
+  if (data.ok) {
+    result.innerHTML = `<div style="background:var(--green-dim);border:1px solid rgba(0,232,122,.3);border-radius:6px;padding:10px 12px;font-size:11px;color:var(--green)">
+      ✅ Order filled at ₹${data.fill_price?.toLocaleString("en-IN",{maximumFractionDigits:2})} · Charges: ₹${data.charges?.toFixed(2)}
+    </div>`;
+    toast(`${currentSide} ${sym} @ ₹${data.fill_price?.toFixed(2)} — Paper filled`, "ok");
+    recentOrders.unshift({sym, side:currentSide, price:data.fill_price, qty, time:new Date().toLocaleTimeString()});
+    renderRecentOrders();
+  } else {
+    result.innerHTML = `<div style="background:var(--red-dim);border:1px solid rgba(255,51,102,.3);border-radius:6px;padding:10px 12px;font-size:11px;color:var(--red)">
+      ❌ ${data.error || "Order failed"}
+    </div>`;
+    toast("Order failed: " + (data.error||"unknown"), "err");
+  }
+}
+
+function renderRecentOrders() {
+  document.getElementById("recent-orders").innerHTML = recentOrders.slice(0,5).map(o =>
+    `<div style="display:flex;justify-content:space-between;padding:6px 0;border-bottom:1px solid var(--border);font-size:11px">
+      <span class="mono" style="font-weight:600">${o.sym}</span>
+      <span class="${o.side==="BUY"?"up":"dn"}">${o.side}</span>
+      <span class="dim">₹${o.price?.toFixed(2)} × ${o.qty}</span>
+      <span class="dim">${o.time}</span>
+    </div>`
+  ).join("") || `<div style="color:var(--txt-3);font-size:11px;text-align:center;padding:12px">No orders yet</div>`;
+}
+
+document.getElementById("t-price").addEventListener("input", updatePreview);
+document.getElementById("t-qty").addEventListener("input",   updatePreview);
+document.getElementById("t-sl").addEventListener("input",    updatePreview);
+document.getElementById("t-target").addEventListener("input",updatePreview);
+
+onSymChange();
+</script>
+{% endblock %}
