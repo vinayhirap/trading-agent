@@ -443,14 +443,14 @@ PAGES = [
     ("trade",     "/trade",       "📟", "Trade",           "Paper and live trade execution"),
     ("alerts",    "/alerts",      "🔔", "Alerts",          "Price and RSI alerts → Telegram"),
     ("portfolio", "/portfolio",   "💼", "Portfolio",       "Paper portfolio P&L and positions"),
-    ("accuracy",      "/accuracy",      "🎯", "Accuracy",        "Prediction vs actual tracking"),
-    ("backtest",      "/backtest",      "📊", "Backtesting",     "Walk-forward backtest engine"),
-    ("status",        "/status",        "⚙️", "System Status",   "Models, APIs, data cache"),
-    ("nerve_center",  "/nerve-center",  "🧠", "Nerve Center",    "Market heatmap + risk-on/off"),
-    ("fii_dii",       "/fii-dii",       "📡", "FII/DII Tracker", "Institutional flow data"),
-    ("options_oi",    "/options-oi",    "📊", "Options OI",      "PCR, max pain, OI heatmap"),
-    ("regime",        "/regime",        "🔭", "Regime Detector", "HMM market regime analysis"),
-    ("system_health", "/system-health", "🏥", "System Health",   "Modules, models, package status"),
+    ("accuracy",  "/accuracy",    "🎯", "Accuracy",        "Prediction vs actual tracking"),
+    ("backtest",  "/backtest",    "📊", "Backtesting",     "Walk-forward backtest engine"),
+    ("status",    "/status",      "⚙️", "System Status",   "Models, APIs, data cache"),
+    ("nerve_center",  "/nerve-center",  "🧠", "Nerve Center",    "Central command and control"),
+    ("fii_dii",       "/fii-dii",       "📡", "FII/DII",         "Institutional money flow tracker"),
+    ("options_oi",    "/options-oi",    "📐", "Options OI",      "Open interest and max pain"),
+    ("regime",        "/regime",        "🌐", "Market Regime",   "HMM regime detection"),
+    ("system_health", "/system-health", "💊", "System Health",   "Phase roadmap and module status"),
 ]
 
 def page_view(template_name: str):
@@ -698,6 +698,8 @@ async def api_mcx_tokens():
         return {"ok": True, "status": mcx_token_manager.get_status()}
     except Exception as e:
         return {"ok": False, "error": str(e)}
+
+
 
 
 # ── API: FII/DII ──────────────────────────────────────────────────────────────

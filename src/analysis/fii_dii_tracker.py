@@ -199,7 +199,14 @@ class FIIDIITracker:
             self._append_history(data)
             return data
 
-        # Return stale cache if fetch failed
+        # Try BSE/alternative source
+        data = self._fetch_alternative()
+        if data:
+            self._save_cache(data)
+            self._append_history(data)
+            return data
+
+        # Return stale cache if all fetches failed
         stale = self._load_cache(ignore_ttl=True)
         if stale:
             logger.warning("FII/DII: using stale cache data")
@@ -306,7 +313,9 @@ class FIIDIITracker:
                         v = equity_row.get(key, 0)
                         try:
                             # NSE sometimes returns strings with commas
-                            return float(str(v).replace(",","").replace("-","0") or 0)
+                            # NOTE: do NOT strip '-' — it's the negative sign
+                            cleaned = str(v).replace(",", "").strip()
+                            return float(cleaned) if cleaned and cleaned not in ("-", "") else 0.0
                         except (ValueError, TypeError):
                             return 0.0
 
@@ -348,6 +357,74 @@ class FIIDIITracker:
             logger.warning("NSE FII/DII: connection error")
         except Exception as e:
             logger.warning(f"NSE FII/DII fetch failed: {e}")
+
+        return None
+
+    # ── Alternative source (Groww / BSE) ────────────────────────────────────
+
+    def _fetch_alternative(self) -> Optional["FIIDIIData"]:
+        """
+        Fetch FII/DII from Groww API — works outside NSE hours, no cookies needed.
+        Falls back to BSE India endpoint if Groww fails.
+        """
+        urls = [
+            # Groww market data (public, no auth)
+            "https://groww.in/v1/api/stocks_data/v1/fii_dii",
+            # BSE India FII/DII
+            "https://api.bseindia.com/BseIndiaAPI/api/FIIDIITradeReact/w",
+        ]
+        for url in urls:
+            try:
+                resp = requests.get(url, timeout=10, headers={
+                    "User-Agent": "Mozilla/5.0",
+                    "Accept": "application/json",
+                })
+                if resp.status_code != 200:
+                    continue
+                raw = resp.json()
+
+                # Groww format: {fiiNetValue, diiNetValue, fiiBuyValue, ...}
+                def _g(d, *keys):
+                    for k in keys:
+                        v = d.get(k)
+                        if v is not None:
+                            try: return float(str(v).replace(",","").strip() or 0)
+                            except: pass
+                    return 0.0
+
+                # Try Groww-style flat dict
+                if "fiiNetValue" in raw or "fii_net" in raw:
+                    fii_buy  = _g(raw, "fiiBuyValue",  "fii_buy",  "fii_gross_buy")
+                    fii_sell = _g(raw, "fiiSellValue", "fii_sell", "fii_gross_sell")
+                    fii_net  = _g(raw, "fiiNetValue",  "fii_net")  or (fii_buy - fii_sell)
+                    dii_buy  = _g(raw, "diiBuyValue",  "dii_buy",  "dii_gross_buy")
+                    dii_sell = _g(raw, "diiSellValue", "dii_sell", "dii_gross_sell")
+                    dii_net  = _g(raw, "diiNetValue",  "dii_net")  or (dii_buy - dii_sell)
+
+                    date_str = raw.get("date", datetime.now().strftime("%Y-%m-%d"))
+                    try:
+                        for fmt in ("%d-%b-%Y", "%Y-%m-%d", "%d/%m/%Y"):
+                            try:
+                                date_str = datetime.strptime(str(date_str), fmt).strftime("%Y-%m-%d")
+                                break
+                            except ValueError:
+                                continue
+                    except Exception:
+                        date_str = datetime.now().strftime("%Y-%m-%d")
+
+                    if fii_buy > 0 or fii_sell > 0 or fii_net != 0:
+                        data = FIIDIIData(
+                            date=date_str, fii_buy_cr=fii_buy, fii_sell_cr=fii_sell,
+                            fii_net_cr=fii_net, dii_buy_cr=dii_buy, dii_sell_cr=dii_sell,
+                            dii_net_cr=dii_net, source="groww_api",
+                            fetched_at=datetime.now().isoformat(),
+                        )
+                        logger.info(f"FII/DII from alternative ({url.split('/')[2]}): FII {fii_net:+,.0f} Cr")
+                        return data
+
+            except Exception as e:
+                logger.debug(f"FII/DII alternative {url}: {e}")
+                continue
 
         return None
 

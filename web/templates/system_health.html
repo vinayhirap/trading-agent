@@ -181,6 +181,22 @@
     </div>
   </div>
 </div>
+
+<!-- Optuna Tuner — Phase 4 -->
+<div class="card" style="margin-top:14px">
+  <div class="card-hd">
+    🔬 Optuna Bayesian HPO — Phase 4
+    <button class="btn btn-ghost btn-sm" onclick="loadOptuna()">↻ Refresh</button>
+  </div>
+  <div id="optuna-status" style="color:var(--txt-3);font-size:12px;padding:8px">Loading…</div>
+  <div style="margin-top:10px;display:flex;gap:8px;flex-wrap:wrap" id="optuna-run-btns">
+    {% for ac in ["index","equity","futures","crypto"] %}
+    <button class="btn btn-ghost btn-sm" onclick="runTuning('{{ ac }}')">▶ Tune {{ ac }}</button>
+    {% endfor %}
+    <button class="btn btn-ghost btn-sm" onclick="runTuning('all')" style="color:var(--gold);border-color:var(--gold)">▶ Tune All</button>
+  </div>
+  <div id="optuna-run-result" style="margin-top:8px;font-size:11px;color:var(--txt-2)"></div>
+</div>
 {% endblock %}
 
 {% block extra_js %}
@@ -402,5 +418,39 @@ async function loadModules() {
 // Auto-load
 loadAll();
 setInterval(loadAll, 120000);
+
+async function loadOptuna() {
+  const data = await api("/api/optuna/status");
+  const el = document.getElementById("optuna-status");
+  if (!data.ok) { el.textContent = "Error: " + data.error; return; }
+  const rows = Object.entries(data.results).map(([ac, r]) => {
+    const badge = r.job_status === "running"
+      ? `<span style="color:var(--gold)">⏳ running</span>`
+      : r.tuned
+        ? `<span class="up">✅ tuned — ${r.best_accuracy}% acc · ${r.n_trials} trials · ${r.duration_s}s</span>`
+        : `<span style="color:var(--txt-3)">not tuned</span>`;
+    return `<div style="display:flex;justify-content:space-between;padding:5px 0;border-bottom:1px solid var(--border);font-size:11px">
+      <span class="mono" style="font-weight:600;color:var(--txt)">${ac}</span>${badge}</div>`;
+  });
+  el.innerHTML = rows.join("") || `<div style="color:var(--txt-3)">No tuning data</div>`;
+}
+
+async function runTuning(ac) {
+  const res = document.getElementById("optuna-run-result");
+  res.textContent = `Starting tuning for ${ac}…`;
+  const data = await api("/api/optuna/run", "POST", { asset_class: ac, n_trials: 30 });
+  if (data.ok) {
+    res.style.color = "var(--green)";
+    res.textContent = data.message;
+    toast(data.message, "inf");
+    setTimeout(loadOptuna, 3000);
+  } else {
+    res.style.color = "var(--red)";
+    res.textContent = "Error: " + data.error;
+    toast(data.error, "err");
+  }
+}
+
+loadOptuna();
 </script>
 {% endblock %}

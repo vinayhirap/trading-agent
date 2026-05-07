@@ -368,6 +368,10 @@ class MCXTokenManager:
         self._started = False
         self._thread: Optional[threading.Thread] = None
 
+    def get_tokens(self) -> dict[str, dict]:
+        """Instance method — delegates to module-level get_tokens()."""
+        return get_tokens()
+
     def start(self):
         """Initialize tokens and start background refresh thread."""
         if self._started:
@@ -430,10 +434,6 @@ class MCXTokenManager:
                     for c, info in _current_tokens.items()
                 }
             }
-
-    def get_tokens(self) -> dict:
-        """Return raw token dict — delegates to module-level get_tokens()."""
-        return get_tokens()
 
     def force_refresh(self) -> dict:
         """Force immediate token refresh — useful for testing."""

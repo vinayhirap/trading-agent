@@ -157,14 +157,27 @@ class YFinanceAdapter(BaseDataAdapter):
 
         for orig_sym, yf_sym in zip(symbols, yf_symbols):
             try:
-                if len(yf_symbols) == 1:
-                    df = raw.copy()
+                # yfinance >=0.2 always returns MultiIndex columns even for 1 ticker
+                if isinstance(raw.columns, pd.MultiIndex):
+                    if yf_sym in raw.columns.get_level_values(0):
+                        df = raw[yf_sym].copy()
+                    elif yf_sym in raw.columns.get_level_values(1):
+                        df = raw.xs(yf_sym, axis=1, level=1).copy()
+                    else:
+                        logger.warning(f"No data in batch result for {yf_sym}")
+                        results[orig_sym] = pd.DataFrame()
+                        continue
                 else:
-                    df = raw[yf_sym].copy()
+                    # Single ticker — raw IS the df
+                    df = raw.copy()
+
+                if df is None or df.empty:
+                    results[orig_sym] = pd.DataFrame()
+                    continue
 
                 df.columns = [c.lower() for c in df.columns]
                 keep = [c for c in ["open","high","low","close","volume"] if c in df.columns]
-                df = df[keep]
+                df = df[keep].dropna(how="all")
 
                 if df.index.tzinfo is None:
                     df.index = df.index.tz_localize("UTC")

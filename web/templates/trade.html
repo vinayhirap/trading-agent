@@ -84,6 +84,18 @@
       <div class="order-row"><span class="dim">R:R Ratio</span><span class="mono" id="prev-rr">—</span></div>
     </div>
 
+    <!-- Mode selector -->
+    <div style="display:flex;gap:6px;margin-bottom:10px">
+      <button class="btn btn-ghost btn-sm" id="mode-paper" onclick="setMode('paper')" style="flex:1;border-color:var(--blue);color:var(--blue)">📄 Paper</button>
+      <button class="btn btn-ghost btn-sm" id="mode-live"  onclick="setMode('live')"  style="flex:1">⚡ Live</button>
+    </div>
+
+    <!-- RL Sizer -->
+    <div style="display:flex;gap:6px;margin-bottom:10px">
+      <button class="btn btn-ghost btn-sm" style="flex:1" onclick="getRLSize()">🤖 RL Size Rec</button>
+      <span class="mono" id="rl-size-val" style="font-size:11px;color:var(--gold);align-self:center">—</span>
+    </div>
+
     <button class="btn btn-primary" style="width:100%;justify-content:center;padding:12px" onclick="placeOrder()" id="place-btn">
       Place Paper Order
     </button>
@@ -133,7 +145,34 @@
 
 {% block extra_js %}
 <script>
-let currentSide = "BUY", recentOrders = [], currentPrices = {};
+let currentSide = "BUY", recentOrders = [], currentPrices = {}, tradeMode = "paper";
+
+function setMode(m) {
+  tradeMode = m;
+  document.getElementById("mode-paper").style.borderColor = m === "paper" ? "var(--blue)"  : "";
+  document.getElementById("mode-paper").style.color       = m === "paper" ? "var(--blue)"  : "";
+  document.getElementById("mode-live").style.borderColor  = m === "live"  ? "var(--red)"   : "";
+  document.getElementById("mode-live").style.color        = m === "live"  ? "var(--red)"   : "";
+  document.getElementById("place-btn").textContent = m === "live" ? "⚡ Place LIVE Order" : "Place Paper Order";
+  document.getElementById("place-btn").style.background  = m === "live" ? "var(--red)"    : "";
+  if (m === "live") toast("⚠️ LIVE mode — orders go to Angel One", "err");
+}
+
+async function getRLSize() {
+  const sym  = document.getElementById("t-sym").value;
+  const data = await api("/api/rl-sizer", "POST", {
+    regime: "RANGING_LOW", confidence: 0.6,
+    atr_ratio: 1.0, rsi: 50, win_rate: 0.5,
+    drawdown: 0.0, util: 0.0, fii_signal: 0.0,
+  });
+  const el = document.getElementById("rl-size-val");
+  if (data.ok) {
+    el.textContent = `${data.size_pct}% · ₹${data.size_inr?.toLocaleString("en-IN")}`;
+    toast(`RL Sizer: ${data.size_pct}% of capital`, "inf");
+  } else {
+    el.textContent = "unavailable";
+  }
+}
 
 window.addEventListener("prices", e => {
   currentPrices = e.detail.prices;
@@ -237,16 +276,18 @@ async function placeOrder() {
   const data = await api("/api/trade/execute", "POST", {
     symbol: sym, side: currentSide, quantity: qty,
     price, sl, target, signal: "MANUAL", confidence: 0.6,
+    mode: tradeMode,
   });
 
-  btn.disabled = false; btn.textContent = "Place Paper Order";
+  btn.disabled = false; btn.textContent = tradeMode === "live" ? "⚡ Place LIVE Order" : "Place Paper Order";
   const result = document.getElementById("order-result");
   result.style.display = "block";
   if (data.ok) {
+    const modeTag = data.mode === "live" ? "⚡ LIVE" : "📄 Paper";
     result.innerHTML = `<div style="background:var(--green-dim);border:1px solid rgba(0,232,122,.3);border-radius:6px;padding:10px 12px;font-size:11px;color:var(--green)">
-      ✅ Order filled at ₹${data.fill_price?.toLocaleString("en-IN",{maximumFractionDigits:2})} · Charges: ₹${data.charges?.toFixed(2)}
+      ✅ ${modeTag} order filled @ ₹${data.fill_price?.toLocaleString("en-IN",{maximumFractionDigits:2})} · Charges: ₹${data.charges?.toFixed(2)}${data.order_id ? " · ID: "+data.order_id : ""}
     </div>`;
-    toast(`${currentSide} ${sym} @ ₹${data.fill_price?.toFixed(2)} — Paper filled`, "ok");
+    toast(`${currentSide} ${sym} @ ₹${data.fill_price?.toFixed(2)} — ${modeTag} filled`, "ok");
     recentOrders.unshift({sym, side:currentSide, price:data.fill_price, qty, time:new Date().toLocaleTimeString()});
     renderRecentOrders();
   } else {
