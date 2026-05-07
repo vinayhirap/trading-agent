@@ -503,7 +503,6 @@ app.add_route("/fii-dii",       page_view("fii_dii"),       methods=["GET"])
 app.add_route("/options-oi",    page_view("options_oi"),    methods=["GET"])
 app.add_route("/regime",        page_view("regime"),        methods=["GET"])
 app.add_route("/system-health", page_view("system_health"), methods=["GET"])
-app.add_route("/system-health", page_view("system_health"), methods=["GET"])
 
 # ── REST API ──────────────────────────────────────────────────────────────────
 from fastapi import APIRouter
