@@ -42,7 +42,7 @@ from dataclasses import dataclass, field, asdict
 from loguru import logger
 from zoneinfo import ZoneInfo
 
-ROOT       = Path(__file__).resolve().parents[3]
+ROOT       = Path(__file__).resolve().parents[2]  # src/alerts → src → project root
 DATA_DIR   = ROOT / "data"
 ALERTS_FILE = DATA_DIR / "price_alerts.json"
 HISTORY_FILE = DATA_DIR / "alert_history.json"
@@ -328,12 +328,16 @@ class PriceAlertManager:
         if alert.note:
             msg += f"\n📝 <i>{alert.note}</i>"
 
-        # Send Telegram
+        # Send Telegram (respects per-category notification prefs)
         try:
-            from src.alerts.telegram_sender import make_telegram_sender_from_settings
-            from config.settings import settings
-            make_telegram_sender_from_settings(settings).send_message(msg)
-            logger.info(f"🔔 Alert fired: {alert.symbol} {alert.alert_type} @ {actual_val:.2f}")
+            from src.alerts.daily_summary import NotificationPrefs
+            if NotificationPrefs.load().is_enabled("price_alert"):
+                from src.alerts.telegram_sender import make_telegram_sender_from_settings
+                from config.settings import settings
+                make_telegram_sender_from_settings(settings).send_message(msg)
+                logger.info(f"🔔 Alert fired: {alert.symbol} {alert.alert_type} @ {actual_val:.2f}")
+            else:
+                logger.debug(f"🔔 Alert fired (Telegram suppressed): {alert.symbol}")
         except Exception as e:
             logger.error(f"Alert Telegram send failed: {e}")
             

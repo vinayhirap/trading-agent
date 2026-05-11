@@ -23,8 +23,8 @@ class Settings(BaseSettings):
     # =========================
     # 💰 CAPITAL & RISK
     # =========================
-    INITIAL_CAPITAL: float = 100000.0
-    MAX_RISK_PER_TRADE: float = 0.01
+    INITIAL_CAPITAL: float = 10000.0      # Rs 10,000 starting capital
+    MAX_RISK_PER_TRADE: float = 0.02       # 2% = Rs 200 max risk per trade
     MAX_DAILY_LOSS_PCT: float = 0.02
     MAX_OPEN_POSITIONS: int = 3
     MAX_PORTFOLIO_RISK: float = 0.05
@@ -55,6 +55,7 @@ class Settings(BaseSettings):
     NEWS_API_KEY: str | None = None
     ALPHA_VANTAGE_KEY: str | None = None
     GNEWS_API_KEY: str | None = None
+    DASHBOARD_API_KEY: str | None = None  # Set in .env to protect /api/* endpoints
 
     # =========================
     # 🤖 TELEGRAM

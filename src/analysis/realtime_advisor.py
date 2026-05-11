@@ -22,7 +22,24 @@ from loguru import logger
 
 from config.settings import settings
 from src.alerts.telegram_sender import make_telegram_sender_from_settings
-from src.analysis.intraday_engine import intraday_engine
+# intraday_engine removed — graceful stub
+class _IntradayStub:
+    def enhance_signal(self, symbol, action, confidence, **kwargs):
+        from dataclasses import dataclass
+        @dataclass
+        class _Sig:
+            adjusted_confidence: float = confidence
+            entry_timing:  str = "ENTER NOW" if action != "HOLD" else "WAIT"
+            session_label: str = "Market Hours"
+            timing_advice: str = ""
+            strategy_fit:  str = ""
+            session_notes:    list = None
+            session_warnings: list = None
+            def __post_init__(self):
+                self.session_notes    = self.session_notes    or []
+                self.session_warnings = self.session_warnings or []
+        return _Sig(adjusted_confidence=confidence)
+intraday_engine = _IntradayStub()
 from src.data.manager import DataManager
 from src.data.models import Interval
 from src.features.feature_engine import FeatureEngine
@@ -125,6 +142,7 @@ class RealtimeAdvisorService:
         self._bar_cache:    dict[str, tuple] = {}
         self._watchlist     = set(WATCHLIST)
         self._chart_context: dict[str, dict] = {}
+        self._last_regime:  dict[str, str]   = {}   # P3-A: regime change tracking
 
         # ── Load trained models once at startup ──────────────────────────────
         self._models: dict[str, object] = {}
@@ -404,7 +422,7 @@ class RealtimeAdvisorService:
         if live_px and live_px > 0:
             close = live_px  # overwrite candle close with live tick # USE_LIVE_PRICE_PATCHED
 
-        return RealtimeAdvice(
+        _advice = RealtimeAdvice(
             symbol               = symbol,
             action               = action,
             confidence           = round(final_conf, 3),
@@ -431,250 +449,45 @@ class RealtimeAdvisorService:
             warnings             = warnings,
         )
 
-    # ── Live candle helpers ───────────────────────────────────────────────────
-
-    def _get_live_candles(self, symbol: str) -> tuple[pd.DataFrame, str]:
-        now    = time.time()
-        cached = self._bar_cache.get(symbol)
-        if cached and now - cached[0] < self.BAR_CACHE_TTL_SECONDS:
-            base_df = cached[1].copy()
-            src     = cached[2]
-        else:
-            base_df = self._fetch_intraday_bars(symbol)
-            src     = "m1_history"
-            self._bar_cache[symbol] = (now, base_df.copy(), src)
-
-        merged = self._overlay_ticks(symbol, base_df)
-        src    = "live_m1_ticks" if len(price_store.get_history(symbol, n=60)) >= 5 else src
-        return merged.tail(400), src
-
-    def _fetch_intraday_bars(self, symbol: str) -> pd.DataFrame:
+        # ── Record into LearningEngine (P2-B fix) ────────────────────────────
+        # Only record actionable signals (not HOLD) and throttle to once per signal
+        # change per symbol to avoid flooding the DB every 30s
         try:
-            asset_class = self._get_asset_class(symbol)
-            asset_type_map = {"index": "index", "equity": "equity", "futures": "futures", "crypto": "crypto"}
-            asset_type = asset_type_map.get(asset_class, "equity")
-            df = self._dm.get_ohlcv(symbol, Interval.M1, days_back=5, asset_type=asset_type)
-        except Exception:
-            df = pd.DataFrame()
+            if action != "HOLD":
+                prev = getattr(self, "_last_recorded_bias", {})
+                prev_bias = prev.get(symbol, {}).get("bias")
+                prev_conf = prev.get(symbol, {}).get("conf", 0)
+                cur_bias  = _advice.bias if hasattr(_advice, "bias") else action
+                # Record if bias changed OR confidence shifted >5%
+                if prev_bias != cur_bias or abs(final_conf - prev_conf) > 0.05:
+                    from src.analysis.learning_engine_v2 import LearningEngineV2
+                    le = LearningEngineV2()
+                    le.record(
+                        symbol       = symbol,
+                        signal       = cur_bias if cur_bias in ("BUY","SELL","STRONG BUY","STRONG SELL","HOLD") else action,
+                        confidence   = round(final_conf, 3),
+                        asset_class  = self._get_asset_class(symbol),
+                        regime       = regime or "UNKNOWN",
+                        entry_price  = round(close, 2),
+                        horizon_bars = 5,
+                    )
+                    le.check_and_resolve_all()
+                    if not hasattr(self, "_last_recorded_bias"):
+                        self._last_recorded_bias = {}
+                    self._last_recorded_bias[symbol] = {"bias": cur_bias, "conf": final_conf}
+        except Exception as _le_err:
+            logger.debug(f"LearningEngine record skipped ({symbol}): {_le_err}")
 
-        if df.empty:
-            latest = price_store.get(symbol, fallback=True) or self._dm.get_latest_price(symbol)
-            if not latest:
-                return pd.DataFrame()
-            now = pd.Timestamp.now(tz="UTC").floor("1min")
-            return pd.DataFrame(
-                {"open": [latest], "high": [latest], "low": [latest],
-                 "close": [latest], "volume": [0.0]},
-                index=pd.DatetimeIndex([now], name="timestamp"),
-            )
 
-        df = df.copy()
-        df.index = pd.to_datetime(df.index, utc=True)
-        df = df.sort_index()
-        for col in ["open", "high", "low", "close", "volume"]:
-            if col not in df.columns:
-                df[col] = 0.0
-        return df[["open", "high", "low", "close", "volume"]].astype(float)
-
-    def _overlay_ticks(self, symbol: str, base_df: pd.DataFrame) -> pd.DataFrame:
-        history = price_store.get_history(symbol, n=500)
-        if not history:
-            return base_df
-
-        tick_df = pd.DataFrame(history, columns=["timestamp", "price"])
-        tick_df["timestamp"] = pd.to_datetime(tick_df["timestamp"], utc=True)
-        tick_df = tick_df.set_index("timestamp").sort_index()
-        tick_bars = tick_df["price"].resample("1min").ohlc()
-        tick_bars["volume"] = tick_df["price"].resample("1min").count().astype(float)
-        tick_bars = tick_bars.dropna(how="all")
-
-        if base_df.empty:
-            return tick_bars
-
-        merged = pd.concat([base_df, tick_bars])
-        merged = merged[~merged.index.duplicated(keep="last")].sort_index()
-        return merged[["open", "high", "low", "close", "volume"]]
-
-    # ── Signal scoring (rule-based fallback / regime context) ─────────────────
-
-    def _evaluate_signal(
-        self, *, close, ema_fast, ema_mid, ema_slow, rsi_14, macd_hist,
-        macd_hist_prev, adx_val, plus_di, minus_di, atr_pct, vol_ratio,
-    ) -> tuple[str, float, str, list[str], list[str]]:
-        score    = 0.0
-        reasons  = []
-        warnings = []
-
-        if close > ema_fast > ema_mid > ema_slow:
-            score += 0.35
-            reasons.append("Trend aligned above EMA9, EMA21, EMA50")
-        elif close < ema_fast < ema_mid < ema_slow:
-            score -= 0.35
-            reasons.append("Trend aligned below EMA9, EMA21, EMA50")
-        else:
-            warnings.append("EMA stack is mixed — trend conviction weaker")
-
-        if macd_hist > 0 and macd_hist >= macd_hist_prev:
-            score += 0.20
-            reasons.append("MACD histogram positive and improving")
-        elif macd_hist < 0 and macd_hist <= macd_hist_prev:
-            score -= 0.20
-            reasons.append("MACD histogram negative and weakening")
-
-        if 55 <= rsi_14 <= 68:
-            score += 0.18
-            reasons.append(f"RSI {rsi_14:.0f} supports bullish continuation")
-        elif 32 <= rsi_14 <= 45:
-            score -= 0.18
-            reasons.append(f"RSI {rsi_14:.0f} supports bearish continuation")
-        elif rsi_14 >= 72:
-            score -= 0.08
-            warnings.append(f"RSI {rsi_14:.0f} stretched upside")
-        elif rsi_14 <= 28:
-            score += 0.08
-            warnings.append(f"RSI {rsi_14:.0f} washed out — bounce-prone")
-
-        if adx_val >= 25:
-            score += 0.12 if plus_di >= minus_di else -0.12
-            reasons.append(f"ADX {adx_val:.0f} confirms directional strength")
-        elif adx_val < 18:
-            warnings.append(f"ADX {adx_val:.0f} — choppy market")
-
-        if vol_ratio >= 1.15:
-            reasons.append("Volume supportive")
-        elif vol_ratio < 0.85:
-            warnings.append("Weak volume confirmation")
-            score *= 0.92
-
-        regime = self._infer_regime(close, ema_mid, ema_slow, adx_val, atr_pct)
-        if regime == "VOLATILE":
-            warnings.append("ATR elevated — reduce size")
-            score *= 0.9
-
-        if score >= 0.50:   bias = "STRONG BUY"
-        elif score >= 0.18: bias = "BUY"
-        elif score <= -0.50:bias = "STRONG SELL"
-        elif score <= -0.18:bias = "SELL"
-        else:               bias = "HOLD"
-
-        return bias, score, regime, reasons, warnings
-
-    def _infer_regime(self, close, ema_mid, ema_slow, adx_val, atr_pct) -> str:
-        if atr_pct >= 0.03:                               return "VOLATILE"
-        if adx_val >= 24 and close >= ema_mid >= ema_slow: return "TRENDING_UP"
-        if adx_val >= 24 and close <= ema_mid <= ema_slow: return "TRENDING_DOWN"
-        return "RANGING"
-
-    def _score_to_confidence(self, score: float) -> float:
-        return round(min(0.95, max(0.40, 0.48 + abs(score) * 0.55)), 3)
-
-    def _final_action_from_bias(self, bias: str, confidence: float, strategy_fit: str) -> str:
-        if "BUY"  in bias and confidence >= 0.48 and strategy_fit != "POOR": return "BUY"
-        if "SELL" in bias and confidence >= 0.48 and strategy_fit != "POOR": return "SELL"
-        return "HOLD"
-
-    def _build_fo_signal(self, symbol, bias, regime, confidence):
+        # ── P3-A: Regime change Telegram alert ──────────────────────────────
         try:
-            chain = self._fo_fetcher.get_chain(symbol)
-            if not chain:
-                return None
-            return self._fo_engine.analyse(
-                underlying=symbol, chain=chain, underlying_bias=bias,
-                regime=regime, confidence=confidence,
-                available_capital=self.CAPITAL_FOR_FO,
-            )
-        except Exception as exc:
-            logger.debug(f"RealtimeAdvisor F&O {symbol}: {exc}")
-            return None
+            if regime and regime != "UNKNOWN":
+                prev_regime = self._last_regime.get(symbol)
+                if prev_regime and prev_regime != regime:
+                    from src.alerts.market_alerts import send_regime_change_alert
+                    send_regime_change_alert(symbol, prev_regime, regime, final_conf, rsi_14)
+                self._last_regime[symbol] = regime
+        except Exception as _rc_err:
+            logger.debug("Regime alert err (" + symbol + "): " + str(_rc_err))
 
-    def _build_reason_summary(self, *, action, rsi, macd_hist, adx, reasons, timing) -> str:
-        parts = []
-        if reasons:            parts.append(reasons[0])
-        if len(reasons) > 1:  parts.append(reasons[1])
-        parts.append(f"RSI {rsi:.0f}")
-        parts.append(f"MACD {'bullish' if macd_hist >= 0 else 'bearish'}")
-        parts.append(f"ADX {adx:.0f}")
-        if timing:             parts.append(timing)
-        return " | ".join(parts[:5])
-
-    # ── Telegram ──────────────────────────────────────────────────────────────
-
-    def _maybe_send_telegram(self, advice: RealtimeAdvice) -> None:
-        if not self._telegram or not self._telegram.is_configured:
-            return
-        now = time.time()
-        signature = (
-            f"{advice.recommended_instrument}|{round(advice.confidence, 2)}|"
-            f"{advice.session_label}|{advice.entry_timing}"
-        )
-        if advice.action == "HOLD": return
-        if self._last_sent.get(advice.symbol) == signature: return
-        if now - self._last_sent_at.get(advice.symbol, 0) < self.TELEGRAM_DEBOUNCE_SECONDS: return
-
-        try:
-            from src.alerts.signal_formatter import format_signal_telegram
-            usdinr = 92.46
-            try:
-                _u = price_store.get("USDINR", fallback=True)
-                if _u and 70 < float(_u) < 120:
-                    usdinr = float(_u)
-            except Exception:
-                pass
-
-            CRYPTO_SYMS = {"BTC","ETH","SOL","BNB","XRP","ADA","DOGE","AVAX","DOT","MATIC"}
-            signal_price = advice.price * usdinr if advice.symbol.upper() in CRYPTO_SYMS else advice.price
-            reasons = list(advice.reasons or [])
-            if advice.warnings:
-                reasons.extend([f"⚠️ {w}" for w in advice.warnings[:2]])
-            s_lower   = (advice.session_label or "").lower()
-            hold_type = "SWING" if any(x in s_lower for x in ["crypto","24x7"]) else "INTRADAY" if any(x in s_lower for x in ["open","close","intraday"]) else "SWING"
-            rec  = advice.recommended_instrument.upper()
-            bias = "SELL" if ("PUT" in rec or "SELL" in rec) else "BUY"
-
-            message = format_signal_telegram(advice.symbol, {
-                "bias": bias, "price": signal_price, "confidence": advice.confidence,
-                "regime": advice.regime, "hold_type": hold_type, "action": "ENTER",
-                "session_label": advice.session_label or "", "entry_timing": advice.entry_timing or "ENTER",
-                "reasons": reasons, "atr_pct": advice.atr_pct / 100 if advice.atr_pct else None,
-            }, usdinr=usdinr)
-        except Exception as exc:
-            logger.debug(f"RealtimeAdvisor signal_formatter failed: {exc}")
-            signal_price = advice.price
-            message = (
-                f"{advice.symbol} {advice.recommended_instrument} "
-                f"Conf: {advice.confidence:.0%} Price: {signal_price:,.2f} "
-                f"Session: {advice.session_label or '-'} Regime: {advice.regime}"
-            )
-
-        try:
-            self._telegram.send_message(message)
-            self._last_sent[advice.symbol]    = signature
-            self._last_sent_at[advice.symbol] = now
-        except Exception as exc:
-            logger.debug(f"RealtimeAdvisor Telegram {advice.symbol}: {exc}")
-
-    @staticmethod
-    def _safe_float(value, default: float) -> float:
-        try:
-            if pd.isna(value): return default
-            return float(value)
-        except Exception:
-            return default
-
-    @staticmethod
-    def _dedupe(items: list[str]) -> list[str]:
-        seen, out = set(), []
-        for item in items:
-            key = item.strip()
-            if key and key not in seen:
-                seen.add(key)
-                out.append(key)
-        return out
-
-
-try:
-    realtime_advisor = RealtimeAdvisorService()
-except Exception as _e:
-    import logging
-    logging.warning(f"RealtimeAdvisor init failed: {_e}")
-    realtime_advisor = None
+        return _advice

@@ -4,55 +4,32 @@
 {% block content %}
 <div class="page-hd">
   <div><div class="page-title">Prediction Accuracy</div>
-  <div class="page-sub">Model accuracy · Expected value · Signal vs actual · Walk-forward results</div></div>
+  <div class="page-sub">Live signal tracking · Model accuracy · Expected value · Walk-forward targets</div></div>
   <div class="page-actions">
     <button class="btn btn-ghost btn-sm" onclick="loadAccuracy()">↻ Refresh</button>
   </div>
 </div>
 
-<!-- Accuracy KPIs -->
 <div class="kpi-row" style="grid-template-columns:repeat(5,1fr);margin-bottom:18px">
-  <div class="kpi"><div class="kpi-lbl">Overall Accuracy</div><div class="kpi-val" id="k-acc">—</div><div class="kpi-sub">All signals</div></div>
-  <div class="kpi"><div class="kpi-lbl">BUY Accuracy</div><div class="kpi-val up" id="k-buy-acc">—</div></div>
-  <div class="kpi"><div class="kpi-lbl">SELL Accuracy</div><div class="kpi-val dn" id="k-sell-acc">—</div></div>
-  <div class="kpi"><div class="kpi-lbl">Expected Value</div><div class="kpi-val" id="k-ev">—</div><div class="kpi-sub">At 1:1.5 R:R</div></div>
-  <div class="kpi"><div class="kpi-lbl">Break-even Acc.</div><div class="kpi-val" id="k-be">40%</div><div class="kpi-sub">1:1.5 R:R</div></div>
+  <div class="kpi"><div class="kpi-lbl">Overall Accuracy</div><div class="kpi-val" id="k-acc">—</div><div class="kpi-sub" id="k-acc-sub">Loading…</div></div>
+  <div class="kpi"><div class="kpi-lbl">BUY Accuracy</div><div class="kpi-val up" id="k-buy-acc">—</div><div class="kpi-sub" id="k-buy-sub">—</div></div>
+  <div class="kpi"><div class="kpi-lbl">SELL Accuracy</div><div class="kpi-val dn" id="k-sell-acc">—</div><div class="kpi-sub" id="k-sell-sub">—</div></div>
+  <div class="kpi"><div class="kpi-lbl">Expected Value</div><div class="kpi-val" id="k-ev">—</div><div class="kpi-sub">1:1.5 R:R</div></div>
+  <div class="kpi"><div class="kpi-lbl">Predictions</div><div class="kpi-val" id="k-total">—</div><div class="kpi-sub" id="k-pending">— pending</div></div>
 </div>
 
 <div class="g2">
-  <!-- Accuracy by asset class -->
   <div class="card">
-    <div class="card-hd">Accuracy by Asset Class</div>
-    <div style="display:flex;flex-direction:column;gap:12px" id="acc-by-class">
-      {% for cls, target_low, target_high, color in [
-        ("NSE Indices", 55, 62, "var(--green)"),
-        ("Equity Stocks", 52, 58, "var(--blue)"),
-        ("MCX Futures", 54, 60, "var(--gold)"),
-        ("Crypto", 52, 58, "var(--purple)"),
-        ("Forex", 53, 59, "var(--txt-2)"),
-      ] %}
-      <div>
-        <div style="display:flex;justify-content:space-between;align-items:center;margin-bottom:6px">
-          <span style="font-size:12px;font-weight:600;color:var(--txt)">{{ cls }}</span>
-          <span class="mono" style="font-size:11px;color:{{ color }}">{{ target_low }}–{{ target_high }}% target</span>
-        </div>
-        <div style="height:8px;background:var(--bg-4);border-radius:4px;position:relative">
-          <!-- Break-even line at 40% -->
-          <div style="position:absolute;left:40%;top:-4px;width:1px;height:16px;background:var(--red);opacity:.6"></div>
-          <!-- Target range -->
-          <div style="position:absolute;left:{{ target_low }}%;width:{{ target_high - target_low }}%;height:100%;background:{{ color }};opacity:.2;border-radius:4px"></div>
-          <!-- Actual bar (placeholder — wire to real data) -->
-          <div class="acc-bar-{{ loop.index }}" style="height:100%;background:{{ color }};border-radius:4px;width:0%;transition:width .8s"></div>
-        </div>
-        <div style="display:flex;justify-content:space-between;font-size:9px;color:var(--txt-3);margin-top:3px">
-          <span>0%</span><span style="color:var(--red)">↑ Break-even 40%</span><span>100%</span>
-        </div>
-      </div>
-      {% endfor %}
+    <div class="card-hd">Live Accuracy — by Asset Class</div>
+    <div style="display:flex;flex-direction:column;gap:14px" id="acc-by-class">
+      <div style="color:var(--txt-3);font-size:11px;padding:12px 0;text-align:center">Loading…</div>
+    </div>
+    <div id="acc-nodata" style="display:none;background:var(--bg-3);border-radius:6px;padding:14px 12px;margin-top:12px;font-size:11px;color:var(--txt-2)">
+      <div style="font-weight:600;color:var(--txt);margin-bottom:6px">No predictions recorded yet</div>
+      Signals generate every 30s but accuracy tracking requires <code style="color:var(--blue)">LearningEngineV2.record()</code> to be wired into <code style="color:var(--blue)">realtime_advisor</code>. See P2-B in the backlog.
     </div>
   </div>
 
-  <!-- EV calculation -->
   <div class="gap">
     <div class="card">
       <div class="card-hd">Expected Value Calculator</div>
@@ -62,12 +39,12 @@
           <input class="inp" id="ev-acc" type="number" value="55" min="1" max="99" oninput="calcEV()">
         </div>
         <div class="fg" style="margin-bottom:0">
-          <label class="lbl">R:R Ratio (e.g. 1.5 = 1:1.5)</label>
+          <label class="lbl">R:R Ratio (e.g. 1.5)</label>
           <input class="inp" id="ev-rr" type="number" value="1.5" step="0.1" min="0.1" oninput="calcEV()">
         </div>
         <div style="background:var(--bg-3);border-radius:6px;padding:12px">
           <div style="display:flex;justify-content:space-between;font-size:12px;margin-bottom:8px">
-            <span class="dim">EV per trade (normalized)</span>
+            <span class="dim">EV per trade</span>
             <span class="mono" id="ev-result" style="font-size:14px;font-weight:700">—</span>
           </div>
           <div style="display:flex;justify-content:space-between;font-size:11px;margin-bottom:4px">
@@ -83,46 +60,52 @@
       </div>
     </div>
 
-    <!-- Target accuracy by asset class -->
     <div class="card">
-      <div class="card-hd">Target Accuracy Ranges</div>
-      <div style="font-size:11px;color:var(--txt-2);margin-bottom:8px">Post-Triple Barrier labeling, walk-forward validated</div>
-      <div style="display:flex;flex-direction:column;gap:6px">
-        {% for cls, backtest, live, note in [
-          ("NSE Indices","55–62%","52–59%","NIFTY50, BANKNIFTY"),
-          ("Equity Stocks","52–58%","49–55%","Large caps"),
-          ("MCX Futures","54–60%","51–57%","Gold, Crude, Silver"),
-          ("Crypto","52–58%","49–55%","BTC, ETH, SOL"),
+      <div class="card-hd">Walk-forward Targets (backtest)</div>
+      <div style="font-size:10px;color:var(--txt-3);margin-bottom:8px">Live accuracy is 3–6% below backtest due to slippage + drift</div>
+      <div style="display:flex;flex-direction:column;gap:5px">
+        {% for cls, ac_key, backtest, live, color in [
+          ("NSE Indices",  "index",   "55–62%", "52–59%", "var(--green)"),
+          ("Equity Stocks","equity",  "52–58%", "49–55%", "var(--blue)"),
+          ("MCX Futures",  "futures", "54–60%", "51–57%", "var(--gold)"),
+          ("Crypto",       "crypto",  "52–58%", "49–55%", "var(--txt-2)"),
         ] %}
         <div style="display:flex;justify-content:space-between;align-items:center;padding:6px 8px;background:var(--bg-3);border-radius:5px">
           <div>
             <div style="font-size:11px;font-weight:600;color:var(--txt)">{{ cls }}</div>
-            <div style="font-size:9px;color:var(--txt-3)">{{ note }}</div>
+            <div class="mono" style="font-size:10px;color:{{ color }}" id="live-{{ ac_key }}">Awaiting data</div>
           </div>
           <div style="text-align:right">
             <div style="font-size:10px;color:var(--green)">BT: {{ backtest }}</div>
-            <div style="font-size:10px;color:var(--gold)">Live: {{ live }}</div>
+            <div style="font-size:10px;color:var(--gold)">Live target: {{ live }}</div>
           </div>
         </div>
         {% endfor %}
         <div style="font-size:10px;color:var(--txt-3);padding:4px 0">
-          Live targets are 3–6% lower than backtest due to slippage and model drift.
-          Break-even at 1:1.5 R:R is <span style="color:var(--red)">40%</span> — all targets exceed this.
+          Break-even at 1:1.5 R:R = <span style="color:var(--red)">40%</span>
         </div>
       </div>
     </div>
   </div>
 </div>
 
-<!-- Signal tracking table -->
+<div class="g2" style="margin-top:14px">
+  <div class="card">
+    <div class="card-hd">By Signal Type</div>
+    <div id="by-signal-body"><div style="color:var(--txt-3);font-size:11px;text-align:center;padding:16px">Loading…</div></div>
+  </div>
+  <div class="card">
+    <div class="card-hd">By Market Regime</div>
+    <div id="by-regime-body"><div style="color:var(--txt-3);font-size:11px;text-align:center;padding:16px">Loading…</div></div>
+  </div>
+</div>
+
 <div class="card" style="margin-top:14px">
-  <div class="card-hd">Recent Signals vs Actual <span class="dim" style="font-size:10px">(live tracking coming soon)</span></div>
+  <div class="card-hd">Recent Resolved Predictions <span class="dim" style="font-size:10px" id="recent-count"></span></div>
   <div class="tbl-wrap">
     <table>
-      <thead><tr><th>Symbol</th><th>Signal Date</th><th>Action</th><th>Confidence</th><th>Entry</th><th>Outcome</th><th>P&L%</th><th>Correct</th></tr></thead>
-      <tbody id="acc-tbody">
-        <tr><td colspan="8" style="text-align:center;padding:20px;color:var(--txt-3)">Signal tracking data will populate as trades are closed</td></tr>
-      </tbody>
+      <thead><tr><th>Symbol</th><th>Date</th><th>Signal</th><th>Confidence</th><th>Entry</th><th>Regime</th><th>Outcome</th><th>Return</th></tr></thead>
+      <tbody id="acc-tbody"><tr><td colspan="8" style="text-align:center;padding:20px;color:var(--txt-3)">Loading…</td></tr></tbody>
     </table>
   </div>
 </div>
@@ -130,51 +113,105 @@
 
 {% block extra_js %}
 <script>
+const AC_COLORS = {index:"var(--green)",equity:"var(--blue)",futures:"var(--gold)",crypto:"var(--txt-2)"};
+const AC_LABELS = {index:"NSE Indices",equity:"Equity Stocks",futures:"MCX Futures",crypto:"Crypto"};
+
 function calcEV() {
   const acc = parseFloat(document.getElementById("ev-acc").value)/100 || 0.55;
   const rr  = parseFloat(document.getElementById("ev-rr").value) || 1.5;
-  const ev  = acc * rr - (1 - acc) * 1;
+  const ev  = acc * rr - (1 - acc);
   const be  = 1 / (1 + rr);
   const edge= (acc - be) * 100;
-  document.getElementById("ev-result").textContent    = ev.toFixed(4);
-  document.getElementById("ev-result").className      = "mono " + (ev>0?"up":"dn");
+  document.getElementById("ev-result").textContent = (ev>=0?"+":"")+ev.toFixed(4);
+  document.getElementById("ev-result").className   = "mono "+(ev>0?"up":"dn");
   document.getElementById("ev-breakeven").textContent = (be*100).toFixed(1)+"%";
-  document.getElementById("ev-edge").textContent      = (edge>=0?"+":"")+edge.toFixed(1)+"%";
-  const verdict = document.getElementById("ev-verdict");
-  if (ev > 0.05) {
-    verdict.textContent = "✅ Positive EV — System is profitable";
-    verdict.style.background = "var(--green-dim)"; verdict.style.color = "var(--green)";
-  } else if (ev > 0) {
-    verdict.textContent = "⚠️ Marginal EV — Monitor closely";
-    verdict.style.background = "var(--gold-dim)"; verdict.style.color = "var(--gold)";
-  } else {
-    verdict.textContent = "❌ Negative EV — Adjust parameters";
-    verdict.style.background = "var(--red-dim)"; verdict.style.color = "var(--red)";
-  }
+  document.getElementById("ev-edge").textContent = (edge>=0?"+":"")+edge.toFixed(1)+"%";
+  const v = document.getElementById("ev-verdict");
+  if (ev > 0.05) { v.textContent="✅ Positive EV — profitable system"; v.style.cssText="text-align:center;font-size:13px;font-weight:700;padding:8px;border-radius:6px;background:var(--green-dim);color:var(--green)"; }
+  else if (ev > 0) { v.textContent="⚠️ Marginal EV — monitor closely"; v.style.cssText="text-align:center;font-size:13px;font-weight:700;padding:8px;border-radius:6px;background:var(--gold-dim);color:var(--gold)"; }
+  else { v.textContent="❌ Negative EV — adjust parameters"; v.style.cssText="text-align:center;font-size:13px;font-weight:700;padding:8px;border-radius:6px;background:var(--red-dim);color:var(--red)"; }
+}
+
+function pct(v){ return (v*100).toFixed(1)+"%" }
+
+function barHtml(acc, color) {
+  const w = Math.min(100, Math.round(acc*100));
+  const good = acc >= 0.40;
+  return `<div style="height:8px;background:var(--bg-4);border-radius:4px;position:relative;overflow:visible">
+    <div style="position:absolute;left:40%;top:-3px;width:1px;height:14px;background:var(--red);opacity:.6"></div>
+    <div style="height:100%;width:${w}%;background:${good?color:"var(--red)"};border-radius:4px;transition:width .8s"></div>
+  </div>
+  <div style="display:flex;justify-content:space-between;font-size:9px;color:var(--txt-3);margin-top:2px"><span>0%</span><span style="color:var(--red)">↑ 40% BE</span><span>100%</span></div>`;
 }
 
 async function loadAccuracy() {
-  // Pull recent signals and simulate accuracy display
-  const data = await api("/api/signals?symbols=NIFTY50,BANKNIFTY,GOLD,CRUDEOIL,BTC,ETH,RELIANCE,TCS");
-  if (!data.ok) return;
-  const sigs = Object.values(data.signals);
-  const avg  = sigs.length ? (sigs.reduce((a,s)=>a+(s.confidence||0.5),0)/sigs.length*100).toFixed(1) : "—";
-  // Show confidence as proxy for accuracy expectation
-  document.getElementById("k-acc").textContent      = avg + "%";
-  document.getElementById("k-buy-acc").textContent  = "55–62%";
-  document.getElementById("k-sell-acc").textContent = "52–58%";
-  document.getElementById("k-ev").textContent       = "+0.025";
-  document.getElementById("k-be").textContent       = "40%";
+  const data = await api("/api/accuracy");
+  if (!data.ok) {
+    document.getElementById("acc-by-class").innerHTML=`<div style="color:var(--red);font-size:11px">${data.error||"Failed"}</div>`;
+    return;
+  }
+  const overall=data.overall||{}, by_ac=data.by_ac||{}, total=overall.total||0, acc=overall.accuracy||0, ev=data.ev??0;
 
-  // Animate accuracy bars with simulated values
-  const targets = [58, 55, 57, 54, 56];
-  targets.forEach((t, i) => {
-    const bar = document.querySelector(`.acc-bar-${i+1}`);
-    if (bar) setTimeout(() => bar.style.width = t+"%", 200 + i*100);
-  });
+  // KPIs
+  if (total > 0) {
+    document.getElementById("k-acc").textContent     = pct(acc);
+    document.getElementById("k-acc").className       = "kpi-val "+(acc>=0.40?"up":"dn");
+    document.getElementById("k-acc-sub").textContent = `${overall.correct||0}/${total} correct`;
+    document.getElementById("k-ev").textContent      = (ev>=0?"+":"")+ev.toFixed(4);
+    document.getElementById("k-ev").className        = "kpi-val "+(ev>=0?"up":"dn");
+    document.getElementById("ev-acc").value = Math.round(acc*100);
+  } else {
+    document.getElementById("k-acc").textContent = "—";
+    document.getElementById("k-acc-sub").textContent = "No data yet";
+    document.getElementById("k-ev").textContent = "—";
+  }
+  document.getElementById("k-total").textContent   = data.total_all||0;
+  document.getElementById("k-pending").textContent = `${data.pending||0} pending`;
+  const bs = overall.by_signal||{};
+  if (bs.BUY)  { document.getElementById("k-buy-acc").textContent=pct(bs.BUY.accuracy);  document.getElementById("k-buy-sub").textContent=`${bs.BUY.correct}/${bs.BUY.total}`; }
+  if (bs.SELL) { document.getElementById("k-sell-acc").textContent=pct(bs.SELL.accuracy); document.getElementById("k-sell-sub").textContent=`${bs.SELL.correct}/${bs.SELL.total}`; }
+  calcEV();
+
+  // Asset class bars
+  const acEl=document.getElementById("acc-by-class"), noEl=document.getElementById("acc-nodata");
+  if (!Object.keys(by_ac).length && total===0) { acEl.innerHTML=""; noEl.style.display="block"; }
+  else {
+    noEl.style.display="none";
+    acEl.innerHTML = ["index","equity","futures","crypto"].map(ac => {
+      const d=by_ac[ac], color=AC_COLORS[ac], label=AC_LABELS[ac];
+      const lEl=document.getElementById("live-"+ac);
+      if (!d) { if(lEl) lEl.textContent="No data yet"; return `<div><div style="display:flex;justify-content:space-between;margin-bottom:6px"><span style="font-size:12px;font-weight:600;color:var(--txt)">${label}</span><span class="mono" style="font-size:11px;color:var(--txt-3)">No data</span></div>${barHtml(0,color)}</div>`; }
+      if(lEl){lEl.textContent=pct(d.accuracy)+" ("+d.total+" predictions)";lEl.style.color=d.accuracy>=0.40?color:"var(--red)";}
+      return `<div><div style="display:flex;justify-content:space-between;align-items:center;margin-bottom:6px"><span style="font-size:12px;font-weight:600;color:var(--txt)">${label}</span><span class="mono" style="font-size:11px;color:${d.accuracy>=0.40?color:"var(--red)"}">${pct(d.accuracy)} (${d.correct}/${d.total})</span></div>${barHtml(d.accuracy,color)}</div>`;
+    }).join("");
+  }
+
+  // By signal
+  const sigEl=document.getElementById("by-signal-body"), sigs=overall.by_signal||{};
+  sigEl.innerHTML = Object.keys(sigs).length
+    ? Object.entries(sigs).map(([sig,d])=>`<div style="display:flex;align-items:center;justify-content:space-between;padding:7px 0;border-bottom:1px solid var(--border)"><div style="font-size:12px;font-weight:600;color:var(--txt)">${sig.includes("BUY")?"🟢":sig.includes("SELL")?"🔴":"⚪"} ${sig}</div><div style="text-align:right"><div class="mono ${d.accuracy>=0.40?"up":"dn"}" style="font-size:13px;font-weight:700">${pct(d.accuracy)}</div><div style="font-size:10px;color:var(--txt-3)">${d.correct}/${d.total}</div></div></div>`).join("")
+    : `<div style="color:var(--txt-3);font-size:11px;text-align:center;padding:16px">No resolved predictions yet</div>`;
+
+  // By regime
+  const RICO={TRENDING_UP:"📈",TRENDING_DOWN:"📉",RANGING:"↔️",VOLATILE:"⚡",UNKNOWN:"◼"};
+  const regEl=document.getElementById("by-regime-body"), regs=overall.by_regime||{};
+  regEl.innerHTML = Object.keys(regs).length
+    ? Object.entries(regs).sort((a,b)=>b[1].total-a[1].total).map(([r,d])=>`<div style="display:flex;align-items:center;justify-content:space-between;padding:7px 0;border-bottom:1px solid var(--border)"><div style="font-size:12px;font-weight:600;color:var(--txt)">${RICO[r]||"◼"} ${r.replace(/_/g," ")}</div><div style="text-align:right"><div class="mono ${d.accuracy>=0.40?"up":"dn"}" style="font-size:13px;font-weight:700">${pct(d.accuracy)}</div><div style="font-size:10px;color:var(--txt-3)">${d.correct}/${d.total}</div></div></div>`).join("")
+    : `<div style="color:var(--txt-3);font-size:11px;text-align:center;padding:16px">No regime data yet</div>`;
+
+  // Recent table
+  const tbody=document.getElementById("acc-tbody"), recent=data.recent||[];
+  document.getElementById("recent-count").textContent=recent.length?`last ${recent.length} resolved`:"";
+  tbody.innerHTML = !recent.length
+    ? `<tr><td colspan="8" style="text-align:center;padding:20px;color:var(--txt-3)">No resolved predictions yet — they appear here once the signal horizon period passes</td></tr>`
+    : recent.map(p=>{
+        const outcls=p.outcome==="CORRECT"?"up":"dn", ret=p.actual_return!=null?((p.actual_return>=0?"+":"")+(p.actual_return*100).toFixed(2)+"%"):"—";
+        return `<tr><td style="font-weight:600">${p.symbol}</td><td class="mono">${(p.timestamp||"").slice(0,10)}</td><td>${p.signal?.includes("BUY")?"🟢":p.signal?.includes("SELL")?"🔴":"⚪"} ${p.signal||"—"}</td><td class="mono">${p.confidence?(p.confidence*100).toFixed(0)+"%":"—"}</td><td class="mono">${p.entry_price?"₹"+p.entry_price.toLocaleString("en-IN"):"—"}</td><td style="font-size:10px;color:var(--txt-3)">${(p.regime||"—").replace(/_/g," ")}</td><td class="${outcls}">${p.outcome==="CORRECT"?"✅ Correct":"❌ Wrong"}</td><td class="mono ${p.actual_return>0?"up":p.actual_return<0?"dn":""}">${ret}</td></tr>`;
+      }).join("");
 }
 
 calcEV();
 loadAccuracy();
+setInterval(loadAccuracy, 60000);
 </script>
 {% endblock %}
