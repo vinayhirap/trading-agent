@@ -210,14 +210,31 @@ function updateSessions() {
   }
 
   // Countdown
-  const nseOpen  = inWindow(h,m,[9,15],[15,30]);
-  const secs_to_close = {{ market.secs_to_close }};
-  const secs_to_open  = {{ market.secs_to_open }};
-  const countdown = nseOpen ? secs_to_close : secs_to_open;
-  if (countdown > 0) {
-    const hh = Math.floor(countdown/3600), mm = Math.floor((countdown%3600)/60), ss = countdown%60;
-    document.getElementById("countdown-val").textContent = `${p(hh)}:${p(mm)}:${p(ss)}`;
-    document.getElementById("countdown-lbl").textContent = nseOpen ? "NSE closes" : "NSE opens";
+  const nseOpen = inWindow(h, m, [9,15], [15,30]);
+
+  // ── Live countdown — calculated fresh every second from IST clock ──────
+  let countdownSecs = 0;
+  let countdownLbl  = "—";
+  if (nseOpen) {
+    // Secs until 15:30
+    const closeH = 15, closeM = 30;
+    countdownSecs = (closeH - h) * 3600 + (closeM - m) * 60 - ist.getSeconds();
+    countdownLbl  = "NSE closes";
+  } else {
+    // Secs until next 09:15 (could be tomorrow)
+    const openH = 9, openM = 15;
+    let secsToOpen = (openH - h) * 3600 + (openM - m) * 60 - ist.getSeconds();
+    if (secsToOpen < 0) secsToOpen += 86400;  // next day
+    countdownSecs = secsToOpen;
+    countdownLbl  = (h > 15 || (h === 15 && m >= 30)) ? "NSE opens tomorrow" : "NSE opens";
+  }
+
+  if (countdownSecs > 0) {
+    const hh = Math.floor(countdownSecs/3600);
+    const mm2 = Math.floor((countdownSecs % 3600) / 60);
+    const ss2 = countdownSecs % 60;
+    document.getElementById("countdown-val").textContent = p(hh) + ":" + p(mm2) + ":" + p(ss2);
+    document.getElementById("countdown-lbl").textContent = countdownLbl;
   } else {
     document.getElementById("countdown-val").textContent = "—";
     document.getElementById("countdown-lbl").textContent = "—";

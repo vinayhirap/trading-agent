@@ -101,6 +101,31 @@
   </div>
 </div>
 
+<!-- FII/DII + Regime row -->
+<div class="g2" style="margin-bottom:14px">
+
+  <!-- FII/DII mini card -->
+  <div class="card">
+    <div class="card-hd">Institutional Flow
+      <a href="/fii-dii" class="btn btn-ghost btn-sm">Full →</a>
+    </div>
+    <div id="dash-fii-body">
+      <div style="color:var(--txt-3);font-size:11px;text-align:center;padding:12px">Loading…</div>
+    </div>
+  </div>
+
+  <!-- Regime mini card -->
+  <div class="card">
+    <div class="card-hd">Market Regime
+      <a href="/regime" class="btn btn-ghost btn-sm">Full →</a>
+    </div>
+    <div id="dash-regime-body">
+      <div style="color:var(--txt-3);font-size:11px;text-align:center;padding:12px">Loading…</div>
+    </div>
+  </div>
+
+</div>
+
 <!-- Signals table -->
 <div class="card">
   <div class="card-hd">
@@ -356,5 +381,103 @@ function refreshAll() {
 refreshAll();
 setInterval(loadSignals,   30000);
 setInterval(loadPortfolio, 60000);
+// ── Dashboard FII/DII mini ─────────────────────────────────────────────────
+async function loadDashFii() {
+  const data = await api("/api/fii-dii");
+  const el   = document.getElementById("dash-fii-body");
+  if (!data.ok || !data.today) {
+    el.innerHTML = `<div style="font-size:11px;color:var(--txt-3);text-align:center;padding:10px">
+      FII/DII data unavailable — market closed</div>`;
+    return;
+  }
+  const t = data.today;
+  const fii = t.fii_net || 0, dii = t.dii_net || 0;
+  if (fii === 0 && dii === 0) {
+    el.innerHTML = `<div style="font-size:11px;color:var(--txt-3);text-align:center;padding:10px">
+      No data yet — check back during market hours</div>`;
+    return;
+  }
+  const combined = fii + dii;
+  const flowIcon = fii > 0 && dii > 0 ? "🟢" : fii < 0 && dii < 0 ? "🔴" : "⚪";
+  const flowLbl  = fii > 0 && dii > 0 ? "STRONG BULL" : fii > 0 ? "FII LED" : dii > 0 ? "DII SUPPORT" : fii < -2000 ? "BEAR ALERT" : "MIXED";
+  const fiiCls   = fii >= 0 ? "up" : "dn", diiCls = dii >= 0 ? "up" : "dn";
+  function fmtCr(v) { return (v >= 0 ? "+" : "") + "₹" + Math.abs(v).toLocaleString("en-IN",{maximumFractionDigits:0}) + " Cr"; }
+  function miniBar(v, max=5000) {
+    const w = Math.min(100, Math.abs(v)/max*100);
+    const col = v >= 0 ? "var(--green)" : "var(--red)";
+    return `<div style="height:5px;background:var(--bg-4);border-radius:3px;margin-top:3px">
+      <div style="height:100%;width:${w}%;background:${col};border-radius:3px"></div></div>`;
+  }
+  el.innerHTML = `
+    <div style="display:flex;flex-direction:column;gap:10px">
+      <div>
+        <div style="display:flex;justify-content:space-between;font-size:11px;margin-bottom:2px">
+          <span class="dim">FII/FPI</span>
+          <span class="mono ${fiiCls}" style="font-weight:700">${fmtCr(fii)}</span>
+        </div>${miniBar(fii)}
+      </div>
+      <div>
+        <div style="display:flex;justify-content:space-between;font-size:11px;margin-bottom:2px">
+          <span class="dim">DII</span>
+          <span class="mono ${diiCls}" style="font-weight:700">${fmtCr(dii)}</span>
+        </div>${miniBar(dii)}
+      </div>
+      <div style="display:flex;justify-content:space-between;align-items:center;padding:7px 10px;
+        background:var(--bg-3);border-radius:5px;margin-top:2px">
+        <span style="font-size:11px;font-weight:700;color:var(--txt)">${flowIcon} ${flowLbl}</span>
+        <span class="mono dim" style="font-size:10px">${fmtCr(combined)} net</span>
+      </div>
+      <div style="font-size:10px;color:var(--txt-3);text-align:right">${t.date || ""}</div>
+    </div>`;
+}
+
+// ── Dashboard Regime mini ──────────────────────────────────────────────────
+async function loadDashRegime() {
+  const data = await api("/api/regime?symbol=NIFTY50");
+  const el   = document.getElementById("dash-regime-body");
+  if (!data.ok) {
+    el.innerHTML = `<div style="font-size:11px;color:var(--txt-3);text-align:center;padding:10px">Regime data unavailable</div>`;
+    return;
+  }
+  const r = data.regime || data;
+  const regime   = (r.regime || "UNKNOWN").replace(/_/g," ");
+  const ICONS    = {"TRENDING UP":"📈","TRENDING DOWN":"📉","RANGING":"↔️","VOLATILE":"⚡","UNKNOWN":"◼"};
+  const COLORS   = {"TRENDING UP":"var(--green)","TRENDING DOWN":"var(--red)","RANGING":"var(--gold)","VOLATILE":"var(--blue)","UNKNOWN":"var(--txt-3)"};
+  const icon     = ICONS[regime]  || "◼";
+  const color    = COLORS[regime] || "var(--txt-2)";
+  const adx      = r.adx  != null ? parseFloat(r.adx).toFixed(1)  : "—";
+  const rsi      = r.rsi  != null ? parseFloat(r.rsi).toFixed(1)  : "—";
+  const atr      = r.atr_ratio != null ? parseFloat(r.atr_ratio).toFixed(3) : "—";
+  const supports = (r.supporting_factors || []).slice(0,3);
+  const conflicts = (r.conflicting_factors || []).slice(0,2);
+  el.innerHTML = `
+    <div style="text-align:center;padding:12px 0 8px">
+      <div style="font-size:28px;margin-bottom:4px">${icon}</div>
+      <div style="font-size:16px;font-weight:700;color:${color}">${regime}</div>
+    </div>
+    <div style="display:grid;grid-template-columns:1fr 1fr 1fr;gap:6px;margin-bottom:10px">
+      <div style="background:var(--bg-3);border-radius:5px;padding:6px;text-align:center">
+        <div style="font-size:9px;color:var(--txt-3)">ADX</div>
+        <div class="mono" style="font-size:13px;font-weight:700;color:var(--txt)">${adx}</div>
+      </div>
+      <div style="background:var(--bg-3);border-radius:5px;padding:6px;text-align:center">
+        <div style="font-size:9px;color:var(--txt-3)">RSI</div>
+        <div class="mono" style="font-size:13px;font-weight:700;color:var(--txt)">${rsi}</div>
+      </div>
+      <div style="background:var(--bg-3);border-radius:5px;padding:6px;text-align:center">
+        <div style="font-size:9px;color:var(--txt-3)">ATR</div>
+        <div class="mono" style="font-size:13px;font-weight:700;color:var(--txt)">${atr}</div>
+      </div>
+    </div>
+    ${supports.length ? `<div style="font-size:10px;color:var(--green);display:flex;flex-direction:column;gap:2px">
+      ${supports.map(f=>`<div>✓ ${f}</div>`).join("")}</div>` : ""}
+    ${conflicts.length ? `<div style="font-size:10px;color:var(--red);display:flex;flex-direction:column;gap:2px;margin-top:4px">
+      ${conflicts.map(f=>`<div>✗ ${f}</div>`).join("")}</div>` : ""}`;
+}
+
+// Init on load
+loadDashFii();
+loadDashRegime();
+
 </script>
 {% endblock %}

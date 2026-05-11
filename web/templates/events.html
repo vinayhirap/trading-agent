@@ -59,38 +59,67 @@
 {% endblock %}
 {% block extra_js %}
 <script>
+const COUNTRY_FLAGS = { IN:"🇮🇳", US:"🇺🇸", EU:"🇪🇺", CN:"🇨🇳", OPEC:"🌍" };
+const IMPACT_COLORS  = { HIGH:"var(--red)", MEDIUM:"var(--gold)", LOW:"var(--txt-3)" };
+const IMPACT_CLS     = { HIGH:"sent-neg", MEDIUM:"", LOW:"sent-neu" };
+
 async function loadEvents() {
-  // Simulate structured event data (replace with real API when available)
-  const events = [
-    {title:"US Fed Interest Rate Decision",date:"2026-05-07",impact:"HIGH",country:"🇺🇸",note:"Market expects hold at 4.25-4.5%"},
-    {title:"RBI MPC Meeting",date:"2026-06-04",impact:"HIGH",country:"🇮🇳",note:"Rate decision — CPI watch"},
-    {title:"NSE Monthly Expiry",date:"2026-04-24",impact:"HIGH",country:"🇮🇳",note:"High volatility expected near close"},
-    {title:"US CPI Data",date:"2026-05-13",impact:"MEDIUM",country:"🇺🇸",note:"Inflation print — risk sentiment driver"},
-    {title:"India GDP Q4",date:"2026-05-29",impact:"MEDIUM",country:"🇮🇳",note:"Growth data — broad market impact"},
-    {title:"OPEC+ Meeting",date:"2026-05-05",impact:"MEDIUM",country:"🌍",note:"Production decision — crude price driver"},
-  ];
-  document.getElementById("e-high").textContent = events.filter(e=>e.impact==="HIGH").length;
-  document.getElementById("e-med").textContent  = events.filter(e=>e.impact==="MEDIUM").length;
-  document.getElementById("e-low").textContent  = events.filter(e=>e.impact==="LOW").length;
-  document.getElementById("e-damp").textContent = "Active";
+  document.getElementById("event-list").innerHTML =
+    `<div style="color:var(--txt-3);font-size:11px;text-align:center;padding:20px">Loading calendar…</div>`;
+
+  const data = await api("/api/events");
+  if (!data.ok) {
+    document.getElementById("event-list").innerHTML =
+      `<div style="color:var(--red);font-size:11px;padding:12px">Failed to load events: ${data.error||"unknown"}</div>`;
+    return;
+  }
+
+  const events = data.events || [];
+  const counts = data.counts || {};
+  document.getElementById("e-high").textContent  = counts.high   || 0;
+  document.getElementById("e-med").textContent   = counts.medium || 0;
+  document.getElementById("e-low").textContent   = counts.low    || 0;
+  document.getElementById("e-damp").textContent  = "Active";
   document.getElementById("evt-count").textContent = `${events.length} events`;
+
+  if (!events.length) {
+    document.getElementById("event-list").innerHTML =
+      `<div style="color:var(--txt-3);font-size:11px;text-align:center;padding:20px">No upcoming events found</div>`;
+    return;
+  }
+
+  const IMPACT_BADGE_CLS = { HIGH:"sent-neg", MEDIUM:"", LOW:"sent-neu" };
+  const SOURCE_LABELS    = { calculated:"F&O Calendar", rbi_calendar:"RBI", rss:"News Feed" };
+
   document.getElementById("event-list").innerHTML = events.map(e => {
-    const cls = e.impact==="HIGH"?"sent-neg":e.impact==="MEDIUM"?"":"sent-neu";
-    const daysLeft = Math.ceil((new Date(e.date)-new Date())/86400000);
-    return `<div style="padding:10px 12px;background:var(--bg-3);border-radius:6px;border-left:2px solid ${e.impact==="HIGH"?"var(--red)":e.impact==="MEDIUM"?"var(--gold)":"var(--txt-3)"}">
-      <div style="display:flex;justify-content:space-between;align-items:flex-start">
-        <div>
-          <div style="font-size:12px;font-weight:600;color:var(--txt)">${e.country} ${e.title}</div>
-          <div style="font-size:10px;color:var(--txt-3);margin-top:3px">${e.note}</div>
+    const flag    = COUNTRY_FLAGS[e.country] || "🌍";
+    const color   = IMPACT_COLORS[e.impact]  || "var(--txt-3)";
+    const badge   = IMPACT_BADGE_CLS[e.impact] || "";
+    const days    = e.days_left;
+    const daysStr = days === 0 ? "TODAY" : days === 1 ? "TOMORROW" : days > 0 ? `in ${days}d` : `${Math.abs(days)}d ago`;
+    const daysCls = days === 0 ? "up" : days < 0 ? "dim" : "";
+    const srcLbl  = SOURCE_LABELS[e.source] || e.source || "";
+    return `<div style="padding:10px 12px;background:var(--bg-3);border-radius:6px;
+      border-left:3px solid ${color};margin-bottom:6px">
+      <div style="display:flex;justify-content:space-between;align-items:flex-start;gap:10px">
+        <div style="flex:1;min-width:0">
+          <div style="font-size:12px;font-weight:600;color:var(--txt);margin-bottom:3px">
+            ${flag} ${e.title}
+          </div>
+          ${e.note ? `<div style="font-size:10px;color:var(--txt-3);line-height:1.4">${e.note}</div>` : ""}
+          <div style="font-size:9px;color:var(--txt-3);margin-top:4px">
+            ${e.date} · ${srcLbl}
+          </div>
         </div>
-        <div style="text-align:right;flex-shrink:0;margin-left:12px">
-          <span class="sent-badge ${cls}" style="font-size:8px">${e.impact}</span>
-          <div style="font-size:10px;color:var(--txt-3);margin-top:4px">${daysLeft>0?`in ${daysLeft}d`:daysLeft===0?"TODAY":"past"}</div>
+        <div style="text-align:right;flex-shrink:0">
+          <span class="sent-badge ${badge}" style="font-size:8px;display:block;margin-bottom:4px">${e.impact}</span>
+          <span class="mono ${daysCls}" style="font-size:10px">${daysStr}</span>
         </div>
       </div>
     </div>`;
   }).join("");
 }
 loadEvents();
+setInterval(loadEvents, 300000);  // refresh every 5 min
 </script>
 {% endblock %}
