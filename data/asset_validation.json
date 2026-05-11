@@ -1,118 +1,18 @@
 {
   "index": {
-    "accuracy": 61.4,
-    "n_symbols": 5,
-    "n_bars": 3211,
-    "n_features": 52,
-    "n_folds": 7,
-    "label_horizon": 5,
-    "symbols_trained": [
-      "NIFTY50",
-      "BANKNIFTY",
-      "NIFTYIT",
-      "SENSEX",
-      "NIFTYMID"
-    ],
-    "fold_accuracies": [
-      52.9,
-      51.1,
-      63.8,
-      56.6,
-      74.3,
-      66.3,
-      64.6
-    ]
+    "accuracy": 0.0,
+    "error": "No module named 'src.features.indicators'"
   },
   "equity": {
-    "accuracy": 52.9,
-    "n_symbols": 25,
-    "n_bars": 16125,
-    "n_features": 51,
-    "n_folds": 7,
-    "label_horizon": 7,
-    "symbols_trained": [
-      "RELIANCE",
-      "TCS",
-      "HDFCBANK",
-      "INFY",
-      "ICICIBANK",
-      "SBIN",
-      "WIPRO",
-      "AXISBANK",
-      "KOTAKBANK",
-      "LT",
-      "BAJFINANCE",
-      "MARUTI",
-      "SUNPHARMA",
-      "BHARTIARTL",
-      "TATASTEEL",
-      "JSWSTEEL",
-      "ONGC",
-      "NTPC",
-      "ASIANPAINT",
-      "DRREDDY",
-      "BAJAJFINSV",
-      "ULTRACEMCO",
-      "COALINDIA",
-      "POWERGRID",
-      "HINDALCO"
-    ],
-    "fold_accuracies": [
-      57.1,
-      51.7,
-      53.2,
-      50.7,
-      52.8,
-      51.7,
-      53.3
-    ]
+    "accuracy": 0.0,
+    "error": "No module named 'src.features.indicators'"
   },
   "futures": {
-    "accuracy": 57.7,
-    "n_symbols": 5,
-    "n_bars": 3934,
-    "n_features": 53,
-    "n_folds": 7,
-    "label_horizon": 7,
-    "symbols_trained": [
-      "GOLD",
-      "SILVER",
-      "CRUDEOIL",
-      "COPPER",
-      "NATURALGAS"
-    ],
-    "fold_accuracies": [
-      54.8,
-      51.3,
-      66.4,
-      52.7,
-      56.0,
-      61.3,
-      61.3
-    ]
+    "accuracy": 0.0,
+    "error": "No module named 'src.features.indicators'"
   },
   "crypto": {
-    "accuracy": 49.0,
-    "n_symbols": 5,
-    "n_bars": 4885,
-    "n_features": 52,
-    "n_folds": 7,
-    "label_horizon": 3,
-    "symbols_trained": [
-      "BTC",
-      "ETH",
-      "BNB",
-      "SOL",
-      "XRP"
-    ],
-    "fold_accuracies": [
-      45.7,
-      53.0,
-      48.4,
-      45.2,
-      49.8,
-      45.7,
-      54.9
-    ]
+    "accuracy": 0.0,
+    "error": "No module named 'src.features.indicators'"
   }
 }

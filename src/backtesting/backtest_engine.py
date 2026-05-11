@@ -19,7 +19,7 @@ import numpy as np
 import pandas as pd
 from loguru import logger
 
-ROOT = Path(__file__).resolve().parents[3]
+ROOT = Path(__file__).resolve().parents[2]  # src/backtesting → src → project root
 
 BROKERAGE_PER_ORDER  = 20.0
 BROKERAGE_PCT        = 0.0003
