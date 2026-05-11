@@ -1,8 +1,8 @@
 {
   "counts": {
-    "RANGING_LOW": 13950
+    "RANGING_LOW": 24600
   },
-  "total": 13950,
+  "total": 24600,
   "last_regime": "RANGING_LOW",
   "last_confidence": 0.55
 }
