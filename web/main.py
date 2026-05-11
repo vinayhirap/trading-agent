@@ -108,6 +108,14 @@ def _start_background_services():
                 print("⚠️  AngelOneTicker: credentials missing — using yfinance only")
         except Exception as e:
             print(f"⚠️  AngelOneTicker: {e}")
+
+        try:
+            from src.streaming.event_bus import event_bus
+            import threading as _t
+            _t.Thread(target=event_bus.start, daemon=True, name="EventBus").start()
+            print("✅ EventBus: started")
+        except Exception as e:
+            print(f"⚠️  EventBus: {e}")
            
     threading.Thread(target=_run, daemon=True, name="BGServices").start()
 
@@ -188,6 +196,31 @@ _static_dir = WEB / "static"
 if _static_dir.exists():
     app.mount("/static", StaticFiles(directory=_static_dir), name="static")
 templates = Jinja2Templates(directory=WEB / "templates")
+
+
+# ── API Key Security Middleware (P4-B) ────────────────────────────────────────
+# If DASHBOARD_API_KEY is set in .env, all /api/* requests must include:
+#   Header:  X-API-Key: <your_key>
+#   OR Query: ?api_key=<your_key>
+# Page routes (HTML) are always accessible — no auth needed for local use.
+# Set DASHBOARD_API_KEY in .env only if you expose this on a network.
+@app.middleware("http")
+async def api_key_middleware(request: Request, call_next):
+    from config.settings import settings
+    required_key = getattr(settings, "DASHBOARD_API_KEY", None)
+    # Only protect /api/* routes, and only when key is configured
+    if required_key and request.url.path.startswith("/api/"):
+        provided = (
+            request.headers.get("X-API-Key")
+            or request.headers.get("x-api-key")
+            or request.query_params.get("api_key")
+        )
+        if not provided or provided != required_key:
+            return JSONResponse(
+                status_code=401,
+                content={"ok": False, "error": "Unauthorized — X-API-Key header required"},
+            )
+    return await call_next(request)
 
 
 # ── WebSocket connection manager ──────────────────────────────────────────────
@@ -536,14 +569,60 @@ async def api_market_status():
 
 
 @api.get("/portfolio")
-async def api_portfolio():
+async def api_portfolio(source: str = "paper"):
+    """
+    source=paper  → PaperBroker (default)
+    source=groww  → Groww live holdings (requires Groww data in groww_holdings.json)
+    source=all    → Both combined in one response
+    """
+    result = {}
     try:
         from src.execution.paper_broker import PaperBroker
         from config.settings import settings
-        broker = PaperBroker(initial_capital=settings.INITIAL_CAPITAL)
-        return {"ok": True, "portfolio": broker.get_portfolio_summary()}
+        broker  = PaperBroker(initial_capital=settings.INITIAL_CAPITAL)
+        summary = broker.get_portfolio_summary()
+        history = broker.get_trade_history()
+        summary["recent_trades"] = history[-20:][::-1]  # last 20, newest first
+        result["paper"] = summary
     except Exception as e:
-        return {"ok": False, "error": str(e)}
+        result["paper"] = {"error": str(e)}
+
+    if source in ("groww", "all"):
+        try:
+            from src.portfolio.groww_connector import GrowwConnector
+            gc      = GrowwConnector()
+            gp      = gc.get_portfolio_with_live_prices()
+            result["groww"] = {
+                "total_invested":  gp.total_invested,
+                "total_value":     gp.total_value,
+                "total_pnl":       gp.total_pnl,
+                "total_pnl_pct":   gp.total_pnl_pct,
+                "fetched_at":      gp.fetched_at,
+                "source":          gp.source,
+                "holdings": [
+                    {
+                        "symbol":          h.symbol,
+                        "name":            h.name,
+                        "quantity":        h.quantity,
+                        "avg_buy_price":   h.avg_buy_price,
+                        "current_price":   h.current_price,
+                        "invested_value":  h.invested_value,
+                        "current_value":   h.current_value,
+                        "pnl":             h.pnl,
+                        "pnl_pct":         h.pnl_pct,
+                    }
+                    for h in gp.holdings
+                ],
+            }
+        except Exception as e:
+            result["groww"] = {"error": str(e)}
+
+    if source == "paper":
+        return {"ok": True, "portfolio": result["paper"]}
+    elif source == "groww":
+        return {"ok": True, "portfolio": result.get("groww", {}), "source": "groww"}
+    else:
+        return {"ok": True, "paper": result.get("paper", {}), "groww": result.get("groww", {})}
 
 
 @api.get("/news")
@@ -616,6 +695,55 @@ async def api_alert_delete(request: Request):
         return {"ok": False, "error": str(e)}
 
 
+# ── API: ACCURACY TRACKING ────────────────────────────────────────────────────
+@api.get("/accuracy")
+async def api_accuracy(symbol: str = None, asset_class: str = None):
+    try:
+        from src.analysis.learning_engine_v2 import LearningEngineV2
+        le   = LearningEngineV2()
+
+        # Overall stats
+        overall = le.get_accuracy_stats(
+            symbol=symbol or None,
+            asset_class=asset_class or None
+        )
+
+        # Per-asset-class breakdown (always include even if filtered)
+        by_ac = {}
+        for ac in ("index", "equity", "futures", "crypto"):
+            s = le.get_accuracy_stats(asset_class=ac)
+            if s.get("total", 0) > 0:
+                by_ac[ac] = s
+
+        # Pending (unresolved) count
+        all_preds = le._db.get("predictions", [])
+        pending   = sum(1 for p in all_preds if not p.get("resolved"))
+
+        # Expected value at 1:1.5 R:R
+        acc = overall.get("accuracy", 0)
+        ev  = round(acc * 1.5 - (1 - acc), 4)  # EV = p*reward - (1-p)*risk
+
+        # Recent signals (last 20 resolved)
+        resolved = sorted(
+            [p for p in all_preds if p.get("resolved")],
+            key=lambda x: x.get("timestamp", ""),
+            reverse=True,
+        )[:20]
+
+        return {
+            "ok":         True,
+            "overall":    overall,
+            "by_ac":      by_ac,
+            "pending":    pending,
+            "total_all":  len(all_preds),
+            "ev":         ev,
+            "break_even": 0.40,
+            "recent":     resolved,
+        }
+    except Exception as e:
+        return {"ok": False, "error": str(e)}
+
+
 @api.get("/alerts")
 async def api_alerts_list():
     try:
@@ -642,7 +770,48 @@ async def api_backtest(request: Request):
             None, lambda: engine.run(body["symbol"], start, end, verbose=False)
         )
         BacktestReport.compute_metrics(result)
-        return {"ok": True, "result": BacktestReport.summary_dict(result)}
+        summary = BacktestReport.summary_dict(result)
+
+        # Add numeric fields for charts (summary_dict returns formatted strings)
+        r = result
+        summary["_total_return_pct"]  = round(r.total_return_pct, 2)
+        summary["_annual_return"]     = round(r.annual_return, 2)
+        summary["_benchmark_return"]  = round(r.benchmark_return, 2)
+        summary["_max_drawdown_pct"]  = round(r.max_drawdown_pct, 2)
+        summary["_sharpe_ratio"]      = round(r.sharpe_ratio, 3)
+        summary["_win_rate"]          = round(r.win_rate * 100, 1)
+        summary["_n_trades"]          = r.n_trades
+        summary["_final_capital"]     = round(r.final_capital, 2)
+        summary["_initial_capital"]   = round(r.initial_capital, 2)
+
+        # Equity curve — downsample to max 200 points for performance
+        try:
+            ec = r.equity_curve
+            if hasattr(ec, "reset_index"):
+                ec_df = ec.reset_index()
+                ec_df.columns = ["date", "value"]
+                n = len(ec_df)
+                step = max(1, n // 200)
+                sampled = ec_df.iloc[::step]
+                summary["_equity_curve"] = [
+                    {"date": str(row["date"])[:10], "value": round(float(row["value"]), 2)}
+                    for _, row in sampled.iterrows()
+                ]
+            else:
+                summary["_equity_curve"] = []
+        except Exception:
+            summary["_equity_curve"] = []
+
+        # Grade
+        try:
+            grade, grade_note = BacktestReport.grade(result)
+            summary["_grade"]      = grade
+            summary["_grade_note"] = grade_note
+        except Exception:
+            summary["_grade"] = "—"
+            summary["_grade_note"] = ""
+
+        return {"ok": True, "result": summary}
     except Exception as e:
         return {"ok": False, "error": str(e)}
 
@@ -650,13 +819,13 @@ async def api_backtest(request: Request):
 @api.post("/trade/execute")
 async def api_trade_execute(request: Request):
     body = await request.json()
+    mode = body.get("mode", "paper").lower()
     try:
         import uuid
-        from src.execution.paper_broker import PaperBroker
         from src.risk.models import TradeOrder, OrderSide, OrderStatus
         from config.settings import settings
-        broker = PaperBroker(initial_capital=settings.INITIAL_CAPITAL)
-        order  = TradeOrder(
+
+        order_kwargs = dict(
             order_id     = str(uuid.uuid4())[:8],
             symbol       = body["symbol"],
             side         = OrderSide.BUY if body["side"] == "BUY" else OrderSide.SELL,
@@ -668,10 +837,59 @@ async def api_trade_execute(request: Request):
             signal       = body.get("signal", "MANUAL"),
             confidence   = float(body.get("confidence", 0.5)),
         )
-        record = broker.execute(order, current_price=float(body["price"]))
-        return {"ok": True, "fill_price": record.fill_price, "charges": record.total_charges}
+
+        def _send_trade_telegram(sym, side, qty, fill_price, sl, target, charges, is_live, order_id):
+            try:
+                from src.alerts.daily_summary import NotificationPrefs
+                if not NotificationPrefs.load().is_enabled("trade_executed"):
+                    return
+                from src.alerts.telegram_sender import TelegramSender
+                TelegramSender().send_trade(
+                    sym, side, qty, fill_price, sl, target,
+                    charges, is_live=is_live, order_id=order_id,
+                )
+            except Exception as _te:
+                logger.debug(f"Trade Telegram failed: {_te}")
+
+        if mode == "live":
+            try:
+                from src.brokers.angel_one_live import angel_one_live
+                order      = TradeOrder(**order_kwargs)
+                # angel_one_live.place_order expects positional args, not TradeOrder
+                angel_id = angel_one_live.place_order(
+                    symbol     = order_kwargs["symbol"],
+                    side       = body["side"],
+                    quantity   = order_kwargs["quantity"],
+                    price      = float(body.get("price", 0)),
+                    stop_loss  = order_kwargs["stop_loss"],
+                    target     = order_kwargs["target_price"],
+                )
+                fill_price = float(body.get("price", 0))
+                charges    = 0  # Angel One returns only order_id; charges unknown at placement
+                record     = type("R", (), {"fill_price": fill_price, "total_charges": charges, "order_id": angel_id or order.order_id})()
+                _send_trade_telegram(
+                    order_kwargs["symbol"], body["side"], order_kwargs["quantity"],
+                    fill_price, order_kwargs["stop_loss"], order_kwargs["target_price"],
+                    charges, is_live=True, order_id=order.order_id,
+                )
+                return {"ok": True, "mode": "live", "fill_price": fill_price,
+                        "charges": charges, "order_id": order.order_id}
+            except Exception as e:
+                return {"ok": False, "mode": "live", "error": f"Live order failed: {e}"}
+        else:
+            from src.execution.paper_broker import PaperBroker
+            broker = PaperBroker(initial_capital=settings.INITIAL_CAPITAL)
+            order  = TradeOrder(**order_kwargs)
+            record = broker.execute(order, current_price=float(body["price"]))
+            _send_trade_telegram(
+                order_kwargs["symbol"], body["side"], order_kwargs["quantity"],
+                record.fill_price, order_kwargs["stop_loss"], order_kwargs["target_price"],
+                record.total_charges, is_live=False, order_id=order.order_id,
+            )
+            return {"ok": True, "mode": "paper", "fill_price": record.fill_price,
+                    "charges": record.total_charges, "order_id": order.order_id}
     except Exception as e:
-        return {"ok": False, "error": str(e)}
+        return {"ok": False, "mode": mode, "error": str(e)}
 
 @api.get("/config-status")
 async def api_config_status():
@@ -877,22 +1095,22 @@ async def api_system_health():
             "name": "Phase 3 — Agents & Flow",
             "status": "complete",
             "items": [
-                {"name": "Multi-Agent Engine",          "path": "src/analysis/multi_agent_engine.py"},
                 {"name": "FII/DII Tracker",             "path": "src/analysis/fii_dii_tracker.py"},
                 {"name": "Options OI (PCR + MaxPain)",  "path": "src/analysis/options_oi.py"},
+                {"name": "Market Alerts",               "path": "src/alerts/market_alerts.py"},
             ],
         },
         {
             "name": "Phase 4 — Optimization",
-            "status": "in_progress",
+            "status": "complete",
             "items": [
                 {"name": "Optuna Tuner (Bayesian HPO)", "path": "src/prediction/optuna_tuner.py"},
                 {"name": "System Health Dashboard",     "path": "web/templates/system_health.html"},
             ],
         },
         {
-            "name": "Phase 5 — Production (Future)",
-            "status": "planned",
+            "name": "Phase 5 — Production",
+            "status": "complete",
             "items": [
                 {"name": "RL Position Sizer (DQN)",     "path": "src/prediction/rl_position_sizer.py"},
                 {"name": "Event-Driven Architecture",   "path": "src/streaming/event_bus.py"},
@@ -1017,16 +1235,25 @@ async def api_system_health():
         pass
 
     # Key packages
-    PKGS = ["fastapi", "uvicorn", "xgboost", "lightgbm",
-            "optuna", "pandas", "numpy", "scikit-learn", "hmmlearn"]
+    PKGS = [
+        ("fastapi",      "fastapi"),
+        ("uvicorn",      "uvicorn"),
+        ("xgboost",      "xgboost"),
+        ("lightgbm",     "lightgbm"),
+        ("optuna",       "optuna"),
+        ("pandas",       "pandas"),
+        ("numpy",        "numpy"),
+        ("scikit-learn", "sklearn"),
+        ("hmmlearn",     "hmmlearn"),
+    ]
     packages = []
-    for pkg in PKGS:
+    for pkg_name, import_name in PKGS:
         try:
-            mod = importlib.import_module(pkg.replace("-", "_"))
+            mod = importlib.import_module(import_name)
             ver = getattr(mod, "__version__", "?")
-            packages.append({"name": pkg, "version": ver, "ok": True})
+            packages.append({"name": pkg_name, "version": ver, "ok": True})
         except ImportError:
-            packages.append({"name": pkg, "version": "NOT INSTALLED", "ok": False})
+            packages.append({"name": pkg_name, "version": "NOT INSTALLED", "ok": False})
 
     return {
         "ok": True,
@@ -1070,11 +1297,6 @@ async def api_system_health_modules():
             "FII/DII Tracker":     "src.analysis.fii_dii_tracker",
             "Options OI":          "src.analysis.options_oi",
             "Multi-Agent Engine":  "src.analysis.multi_agent_engine",
-            "Hybrid Engine":       "src.analysis.hybrid_engine",
-            "Event Engine":        "src.analysis.event_engine",
-            "Behavior Model":      "src.analysis.behavior_model",
-            "Prediction Engine":   "src.analysis.prediction_engine",
-            "Action Engine":       "src.analysis.action_engine",
         },
         "Intelligence (Phase 1)": {
             "Alpha Vantage":       "src.data.adapters.alphavantage_adapter",
@@ -1099,8 +1321,309 @@ async def api_system_health_modules():
     ok_ct = sum(1 for v in result.values() for m in v if m["ok"])
     return {"ok": True, "groups": result, "summary": {"total": total, "ok": ok_ct}}
 
-app.include_router(api)
 
+# ── API: NOTIFICATION PREFERENCES ────────────────────────────────────────────
+@api.get("/notification-prefs")
+async def api_notif_prefs_get():
+    try:
+        from src.alerts.daily_summary import NotificationPrefs
+        prefs = NotificationPrefs.load()
+        return {"ok": True, "prefs": prefs.all()}
+    except Exception as e:
+        return {"ok": False, "error": str(e)}
+
+
+@api.post("/notification-prefs")
+async def api_notif_prefs_set(request: Request):
+    body = await request.json()
+    try:
+        from src.alerts.daily_summary import NotificationPrefs
+        prefs    = NotificationPrefs.load()
+        category = body.get("category")
+        enabled  = bool(body.get("enabled", True))
+        if not category:
+            return {"ok": False, "error": "category required"}
+        ok = prefs.set(category, enabled)
+        if ok:
+            return {"ok": True, "category": category, "enabled": enabled}
+        return {"ok": False, "error": f"Unknown category: {category}"}
+    except Exception as e:
+        return {"ok": False, "error": str(e)}
+
+
+@api.post("/notification-test")
+async def api_notif_test(request: Request):
+    """Send a test message to verify Telegram is working."""
+    try:
+        from src.alerts.telegram_sender import TelegramSender
+        from datetime import datetime
+        from zoneinfo import ZoneInfo
+        IST = ZoneInfo("Asia/Kolkata")
+        now = datetime.now(IST).strftime("%H:%M IST")
+        sender = TelegramSender()
+        ok = sender.send_message(
+            f"✅ <b>Test Message</b>\n"
+            f"<i>AI Trading Agent — Telegram is working</i>\n"
+            f"<code>{now}</code>"
+        )
+        return {"ok": ok, "message": "Test sent" if ok else "Send failed — check TELEGRAM_BOT_TOKEN"}
+    except Exception as e:
+        return {"ok": False, "error": str(e)}
+
+
+# ── API: OPTUNA HPO ───────────────────────────────────────────────────────────
+_optuna_jobs: dict = {}  # asset_class → {"status","best_accuracy","n_trials","duration_s","tuned"}
+
+@api.get("/optuna/status")
+async def api_optuna_status():
+    try:
+        from src.prediction.optuna_tuner import OptunaTuner
+        results = {}
+        for ac in ("index", "equity", "futures", "crypto"):
+            job = _optuna_jobs.get(ac, {})
+            results[ac] = {
+                "tuned":         job.get("tuned", False),
+                "job_status":    job.get("status", "idle"),
+                "best_accuracy": job.get("best_accuracy", None),
+                "n_trials":      job.get("n_trials", 0),
+                "duration_s":    job.get("duration_s", 0),
+            }
+        return {"ok": True, "results": results}
+    except Exception as e:
+        return {"ok": False, "error": str(e)}
+
+
+@api.post("/optuna/run")
+async def api_optuna_run(request: Request):
+    body = await request.json()
+    ac   = body.get("asset_class", "all")
+    n    = int(body.get("n_trials", 30))
+    try:
+        import threading, time as _t
+        from src.prediction.optuna_tuner import OptunaTuner
+
+        def _tune(asset_class: str):
+            _optuna_jobs[asset_class] = {"status": "running", "tuned": False, "n_trials": 0}
+            t0 = _t.time()
+            try:
+                tuner  = OptunaTuner(asset_class=asset_class)
+                study  = tuner.run(n_trials=n)
+                best   = study.best_trial
+                dur    = round(_t.time() - t0, 1)
+                acc    = round(best.value * 100, 2) if best and best.value else None
+                _optuna_jobs[asset_class] = {
+                    "status": "complete", "tuned": True,
+                    "best_accuracy": acc, "n_trials": len(study.trials),
+                    "duration_s": dur,
+                }
+            except Exception as ex:
+                _optuna_jobs[asset_class] = {"status": f"error: {ex}", "tuned": False, "n_trials": 0}
+
+        targets = ["index", "equity", "futures", "crypto"] if ac == "all" else [ac]
+        for t in targets:
+            threading.Thread(target=_tune, args=(t,), daemon=True).start()
+
+        return {"ok": True, "message": f"Tuning started for: {', '.join(targets)} ({n} trials each)"}
+    except Exception as e:
+        return {"ok": False, "error": str(e)}
+
+
+# ── API: RL POSITION SIZER ────────────────────────────────────────────────────
+@api.post("/rl-sizer")
+async def api_rl_sizer(request: Request):
+    body = await request.json()
+    try:
+        from src.prediction.rl_position_sizer import RLPositionSizer
+        from config.settings import settings
+        sizer  = RLPositionSizer()
+        state  = {
+            "regime":     body.get("regime", "trending"),
+            "confidence": float(body.get("confidence", 0.6)),
+            "atr_pct":    float(body.get("atr_pct", 0.015)),
+            "rsi":        float(body.get("rsi", 50)),
+            "win_rate":   float(body.get("win_rate", 0.55)),
+            "drawdown":   float(body.get("drawdown", 0.0)),
+        }
+        size_pct = sizer.get_position_size(state)
+        capital  = getattr(settings, "INITIAL_CAPITAL", 1_000_000)
+        size_inr = round(capital * size_pct / 100, 2)
+        return {
+            "ok": True,
+            "size_pct": round(size_pct, 2),
+            "size_inr": size_inr,
+            "capital":  capital,
+            "state":    state,
+        }
+    except Exception as e:
+        # Fallback: Kelly-like heuristic when RL model not trained
+        try:
+            conf    = float(body.get("confidence", 0.6))
+            dd      = float(body.get("drawdown",   0.0))
+            size    = max(1.0, min(5.0, (conf - 0.5) * 20 * (1 - dd)))
+            from config.settings import settings
+            capital = getattr(settings, "INITIAL_CAPITAL", 1_000_000)
+            return {
+                "ok": True,
+                "size_pct": round(size, 2),
+                "size_inr": round(capital * size / 100, 2),
+                "capital":  capital,
+                "fallback": True,
+                "note": "Heuristic sizing — RL model not yet trained",
+            }
+        except Exception as e2:
+            return {"ok": False, "error": str(e2)}
+
+
+# ── API: ECONOMIC CALENDAR ───────────────────────────────────────────────────
+@api.get("/events")
+async def api_events():
+    """
+    Returns upcoming economic events:
+    1. NSE F&O expiry dates (calculated, always accurate)
+    2. RBI MPC meeting schedule (from known 2026 calendar)
+    3. US economic events from Investing.com RSS
+    """
+    from datetime import datetime, timedelta
+    from zoneinfo import ZoneInfo
+    IST = ZoneInfo("Asia/Kolkata")
+    now = datetime.now(IST)
+    events = []
+
+    # ── NSE F&O expiry dates (last Thursday of each month) ───────────────────
+    NSE_HOLIDAYS_2026 = {
+        "2026-01-26", "2026-03-31", "2026-04-14", "2026-04-17",
+        "2026-05-01", "2026-08-15", "2026-10-02", "2026-10-26",
+        "2026-11-05", "2026-11-20", "2026-12-25",
+    }
+    for month_offset in range(0, 6):
+        year  = now.year + (now.month + month_offset - 1) // 12
+        month = (now.month + month_offset - 1) % 12 + 1
+        # Last Thursday of month
+        import calendar
+        last_day = calendar.monthrange(year, month)[1]
+        d = datetime(year, month, last_day, tzinfo=IST)
+        while d.weekday() != 3:   # 3 = Thursday
+            d -= timedelta(days=1)
+        # If holiday, move to Wednesday
+        if d.strftime("%Y-%m-%d") in NSE_HOLIDAYS_2026:
+            d -= timedelta(days=1)
+        if d.date() >= now.date():
+            events.append({
+                "title":   "NSE Monthly F&O Expiry",
+                "date":    d.strftime("%Y-%m-%d"),
+                "impact":  "HIGH",
+                "country": "IN",
+                "note":    "Monthly derivatives expiry — high OI unwinding, elevated volatility near close",
+                "source":  "calculated",
+            })
+
+    # ── RBI MPC 2026 meeting schedule ────────────────────────────────────────
+    RBI_MPC_2026 = [
+        ("2026-06-04", "RBI MPC Decision", "Rate decision — CPI and growth trajectory"),
+        ("2026-08-06", "RBI MPC Decision", "Post-monsoon inflation outlook — key for NBFCs"),
+        ("2026-10-07", "RBI MPC Decision", "Pre-festive policy stance"),
+        ("2026-12-03", "RBI MPC Decision", "Year-end monetary policy review"),
+    ]
+    for date_str, title, note in RBI_MPC_2026:
+        if date_str >= now.strftime("%Y-%m-%d"):
+            events.append({
+                "title":   title,
+                "date":    date_str,
+                "impact":  "HIGH",
+                "country": "IN",
+                "note":    note,
+                "source":  "rbi_calendar",
+            })
+
+    # ── US Events from RSS ───────────────────────────────────────────────────
+    try:
+        import feedparser, re
+        from datetime import timezone
+        RSS_URLS = [
+            "https://feeds.content.dowjones.io/public/rss/mw_topstories",
+            "https://feeds.marketwatch.com/marketwatch/marketpulse/",
+        ]
+        US_KEYWORDS = [
+            "fed ", "fomc", "interest rate", "cpi", "inflation", "jobs report",
+            "nonfarm", "gdp", "payroll", "pce", "powell", "yellen",
+            "treasury", "fed rate", "rate decision",
+        ]
+        seen = set()
+        for url in RSS_URLS:
+            try:
+                feed = feedparser.parse(url)
+                for entry in feed.entries[:15]:
+                    title = entry.get("title", "")
+                    summary = entry.get("summary", "")
+                    text = (title + " " + summary).lower()
+                    if not any(kw in text for kw in US_KEYWORDS):
+                        continue
+                    if title in seen:
+                        continue
+                    seen.add(title)
+                    pub = entry.get("published_parsed")
+                    if pub:
+                        dt = datetime(*pub[:6], tzinfo=timezone.utc).astimezone(IST)
+                        date_str = dt.strftime("%Y-%m-%d")
+                    else:
+                        date_str = now.strftime("%Y-%m-%d")
+                    # Classify impact
+                    high_kw = ["fed ", "fomc", "rate decision", "interest rate"]
+                    impact  = "HIGH" if any(k in text for k in high_kw) else "MEDIUM"
+                    events.append({
+                        "title":   title[:80],
+                        "date":    date_str,
+                        "impact":  impact,
+                        "country": "US",
+                        "note":    summary[:120] if summary else "",
+                        "source":  "rss",
+                    })
+                    if len([e for e in events if e["source"] == "rss"]) >= 8:
+                        break
+            except Exception:
+                continue
+    except ImportError:
+        pass
+
+    # ── Sort by date ─────────────────────────────────────────────────────────
+    events.sort(key=lambda x: x["date"])
+
+    # ── Days-until annotation ─────────────────────────────────────────────────
+    for e in events:
+        try:
+            event_date = datetime.strptime(e["date"], "%Y-%m-%d").replace(tzinfo=IST)
+            days_left  = (event_date.date() - now.date()).days
+            e["days_left"] = days_left
+        except Exception:
+            e["days_left"] = 999
+
+    high   = [e for e in events if e["impact"] == "HIGH"]
+    medium = [e for e in events if e["impact"] == "MEDIUM"]
+    low    = [e for e in events if e["impact"] == "LOW"]
+
+    return {
+        "ok":     True,
+        "events": events,
+        "counts": {"high": len(high), "medium": len(medium), "low": len(low)},
+    }
+
+
+# ── API: EVENT BUS STATUS ─────────────────────────────────────────────────────
+@api.get("/event-bus")
+async def api_event_bus():
+    try:
+        from src.streaming.event_bus import event_bus
+        return {
+            "ok": True,
+            "running":       getattr(event_bus, "_running", False),
+            "queue_size":    getattr(event_bus, "_queue", None) and event_bus._queue.qsize() or 0,
+            "handler_count": len(getattr(event_bus, "_handlers", {})),
+        }
+    except Exception as e:
+        return {"ok": False, "error": str(e)}
+
+
+app.include_router(api)
 
 
 # ── Entry point ───────────────────────────────────────────────────────────────

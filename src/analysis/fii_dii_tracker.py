@@ -133,10 +133,14 @@ class FIIDIIData:
 
     def to_dict(self) -> dict:
         return {
-            "date": self.date, "fii_buy_cr": self.fii_buy_cr,
-            "fii_sell_cr": self.fii_sell_cr, "fii_net_cr": self.fii_net_cr,
-            "dii_buy_cr": self.dii_buy_cr, "dii_sell_cr": self.dii_sell_cr,
-            "dii_net_cr": self.dii_net_cr, "source": self.source,
+            "date": self.date,
+            "fii_buy_cr": self.fii_buy_cr, "fii_buy": self.fii_buy_cr,
+            "fii_sell_cr": self.fii_sell_cr, "fii_sell": self.fii_sell_cr,
+            "fii_net_cr": self.fii_net_cr,  "fii_net": self.fii_net_cr,
+            "dii_buy_cr": self.dii_buy_cr,  "dii_buy": self.dii_buy_cr,
+            "dii_sell_cr": self.dii_sell_cr, "dii_sell": self.dii_sell_cr,
+            "dii_net_cr": self.dii_net_cr,  "dii_net": self.dii_net_cr,
+            "source": self.source,
             "fetched_at": self.fetched_at,
         }
 
@@ -297,44 +301,65 @@ class FIIDIITracker:
 
             raw = resp.json()
 
-            # NSE returns list of records, find equity row
+            # NSE fiidiiTradeReact returns a list where FII and DII are SEPARATE rows
+            # Each row has a "category" field: "FII/FPI", "DII" etc.
             if isinstance(raw, list):
-                equity_row = None
-                for item in raw:
-                    cat = str(item.get("category", "")).lower()
-                    if "equity" in cat or "eq" in cat:
-                        equity_row = item
-                        break
-                if equity_row is None and raw:
-                    equity_row = raw[0]   # fallback to first row
-
-                if equity_row:
-                    def _safe(key):
-                        v = equity_row.get(key, 0)
-                        try:
-                            # NSE sometimes returns strings with commas
-                            # NOTE: do NOT strip '-' — it's the negative sign
-                            cleaned = str(v).replace(",", "").strip()
-                            return float(cleaned) if cleaned and cleaned not in ("-", "") else 0.0
-                        except (ValueError, TypeError):
-                            return 0.0
-
-                    # Try multiple field name patterns NSE has used
-                    fii_buy  = _safe("fiiBuy")  or _safe("fii_buy")  or _safe("buyValue")  or 0
-                    fii_sell = _safe("fiiSell") or _safe("fii_sell") or _safe("sellValue") or 0
-                    fii_net  = _safe("fiiNet")  or _safe("fii_net")  or (fii_buy - fii_sell)
-                    dii_buy  = _safe("diiBuy")  or _safe("dii_buy")  or 0
-                    dii_sell = _safe("diiSell") or _safe("dii_sell") or 0
-                    dii_net  = _safe("diiNet")  or _safe("dii_net")  or (dii_buy - dii_sell)
-
-                    date_str = equity_row.get("date", datetime.now().strftime("%d-%b-%Y"))
-                    # Normalize date format
+                def _safe_row(row, key):
+                    """Parse a numeric value from a row dict, handling commas and dashes."""
+                    if row is None:
+                        return 0.0
+                    v = row.get(key, 0)
                     try:
-                        parsed_date = datetime.strptime(date_str, "%d-%b-%Y")
-                        date_str = parsed_date.strftime("%Y-%m-%d")
-                    except ValueError:
-                        date_str = datetime.now().strftime("%Y-%m-%d")
+                        cleaned = str(v).replace(",", "").strip()
+                        return float(cleaned) if cleaned and cleaned not in ("-", "") else 0.0
+                    except (ValueError, TypeError):
+                        return 0.0
 
+                # Find FII row (foreign institutional / FPI)
+                fii_row = None
+                dii_row = None
+                for item in raw:
+                    cat = str(item.get("category", "") or item.get("name", "")).lower()
+                    if any(k in cat for k in ("fii", "fpi", "foreign")):
+                        fii_row = item
+                    elif any(k in cat for k in ("dii", "domestic")):
+                        dii_row = item
+
+                # Fallback: if no separate rows found, try reading from single equity row
+                if fii_row is None and dii_row is None:
+                    equity_row = next(
+                        (r for r in raw if "equity" in str(r.get("category","")).lower()),
+                        raw[0] if raw else None
+                    )
+                    fii_row = equity_row
+                    dii_row = equity_row
+
+                # Read FII values
+                fii_buy  = (_safe_row(fii_row,"fiiBuy")  or _safe_row(fii_row,"fii_buy")  or _safe_row(fii_row,"buyValue")  or 0)
+                fii_sell = (_safe_row(fii_row,"fiiSell") or _safe_row(fii_row,"fii_sell") or _safe_row(fii_row,"sellValue") or 0)
+                fii_net  = (_safe_row(fii_row,"fiiNet")  or _safe_row(fii_row,"fii_net")  or (fii_buy - fii_sell))
+
+                # Read DII values — from DII row if available, else from shared row
+                if dii_row is not fii_row:
+                    dii_buy  = (_safe_row(dii_row,"diiBuy")  or _safe_row(dii_row,"dii_buy")  or _safe_row(dii_row,"buyValue")  or 0)
+                    dii_sell = (_safe_row(dii_row,"diiSell") or _safe_row(dii_row,"dii_sell") or _safe_row(dii_row,"sellValue") or 0)
+                    dii_net  = (_safe_row(dii_row,"diiNet")  or _safe_row(dii_row,"dii_net")  or (dii_buy - dii_sell))
+                else:
+                    dii_buy  = (_safe_row(fii_row,"diiBuy")  or _safe_row(fii_row,"dii_buy")  or 0)
+                    dii_sell = (_safe_row(fii_row,"diiSell") or _safe_row(fii_row,"dii_sell") or 0)
+                    dii_net  = (_safe_row(fii_row,"diiNet")  or _safe_row(fii_row,"dii_net")  or (dii_buy - dii_sell))
+
+                date_row = fii_row or dii_row or (raw[0] if raw else {})
+
+                date_str = date_row.get("date", datetime.now().strftime("%d-%b-%Y"))
+                # Normalize date format
+                try:
+                    parsed_date = datetime.strptime(date_str, "%d-%b-%Y")
+                    date_str = parsed_date.strftime("%Y-%m-%d")
+                except ValueError:
+                    date_str = datetime.now().strftime("%Y-%m-%d")
+
+                if fii_buy > 0 or fii_sell > 0 or dii_buy > 0 or dii_sell > 0:
                     data = FIIDIIData(
                         date        = date_str,
                         fii_buy_cr  = fii_buy,
@@ -349,7 +374,16 @@ class FIIDIITracker:
                     logger.info(
                         f"FII/DII fetched: FII {fii_net:+,.0f} Cr | DII {dii_net:+,.0f} Cr | {date_str}"
                     )
+                    # P3-B: Send extreme flow alert if threshold crossed
+                    if abs(fii_net) > 2000 or abs(dii_net) > 2000:
+                        try:
+                            from src.alerts.market_alerts import send_fii_dii_extreme_alert
+                            send_fii_dii_extreme_alert(fii_net, dii_net, date_str)
+                        except Exception as _fa_err:
+                            logger.debug("FII extreme alert err: " + str(_fa_err))
                     return data
+                else:
+                    logger.warning("NSE FII/DII: all values zero — possible parse failure")
 
         except requests.exceptions.Timeout:
             logger.warning("NSE FII/DII: request timed out")

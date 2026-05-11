@@ -161,7 +161,9 @@ function fmtCr(v) {
 }
 
 function getSignalClass(fii, dii) {
-  const f = fii >= 0, d = dii >= 0;
+  // If both zero — data unavailable, show neutral
+  if (fii === 0 && dii === 0) return {cls:"neutral", label:"⚪ NO DATA", sub:"FII/DII data unavailable — market closed or NSE blocked"};
+  const f = fii > 0, d = dii > 0;
   if (f && d)   return {cls:"strong-bull", label:"🟢 STRONG BULL", sub:"Both FII & DII buying — 82% Nifty up next day"};
   if (f && !d)  return {cls:"bull",        label:"📈 MILD BULL",   sub:"FII buying, DII selling — moderate bullish"};
   if (!f && d)  return {cls:"neutral",     label:"⚪ NEUTRAL",     sub:"FII selling, DII supporting — wait for confirmation"};
