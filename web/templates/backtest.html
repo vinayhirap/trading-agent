@@ -89,6 +89,18 @@
       </div>
     </div>
 
+    <!-- Equity curve chart (shown after run) -->
+    <div class="card" id="equity-card" style="display:none">
+      <div class="card-hd">Equity Curve
+        <span id="bt-grade" class="mono" style="font-size:12px;margin-left:8px"></span>
+      </div>
+      <canvas id="equity-canvas" height="160" style="width:100%;max-height:160px"></canvas>
+      <div style="margin-top:8px;display:flex;gap:16px;font-size:10px;color:var(--txt-3)">
+        <span>— Portfolio value</span>
+        <span style="color:var(--blue)">— Benchmark (B&H)</span>
+      </div>
+    </div>
+
     <!-- Theory reference -->
     <div class="card">
       <div class="card-hd">Walk-Forward Theory</div>
@@ -104,6 +116,7 @@
 {% endblock %}
 
 {% block extra_js %}
+<script src="https://cdn.jsdelivr.net/npm/chart.js@4.4.0/dist/chart.umd.min.js"></script>
 <script>
 let progressInterval = null;
 
@@ -170,15 +183,24 @@ function renderResults(r, sym, capital) {
     ["Avg Loss", r.avg_loss ? `₹${r.avg_loss.toFixed(0)}` : "—"],
     ["Total Charges", r.total_charges ? `₹${r.total_charges.toFixed(0)}` : "—"],
   ];
+  // Grade badge
+  if (r._grade) {
+    const gradeColors = {"A+":"var(--green)","A":"var(--green)","B":"var(--blue)","C":"var(--gold)","D":"var(--txt-3)","F":"var(--red)"};
+    const gc = gradeColors[r._grade] || "var(--txt-2)";
+    document.getElementById("bt-grade").innerHTML =
+      `<span style="color:${gc};font-weight:700">${r._grade}</span>` +
+      (r._grade_note ? `<span style="color:var(--txt-3);font-size:10px;margin-left:6px">${r._grade_note}</span>` : "");
+  }
+
   document.getElementById("bt-results").innerHTML = `
     <div class="kpi-row" style="grid-template-columns:repeat(3,1fr);margin-bottom:14px">
       <div class="kpi">
         <div class="kpi-lbl">Return</div>
-        <div class="kpi-val ${ret>=0?"up":"dn"}">${ret>=0?"+":""}${ret.toFixed(2)}%</div>
+        <div class="kpi-val ${ret>=0?"up":"dn"}">${ret>=0?"+":""}${typeof ret === "number" ? ret.toFixed(2) : ret}%</div>
       </div>
       <div class="kpi">
         <div class="kpi-lbl">Win Rate</div>
-        <div class="kpi-val ${winRate>=55?"up":winRate>=40?"":"dn"}">${winRate.toFixed(1)}%</div>
+        <div class="kpi-val ${winRate>=55?"up":winRate>=40?"":"dn"}">${typeof winRate === "number" ? winRate.toFixed(1) : winRate}%</div>
       </div>
       <div class="kpi">
         <div class="kpi-lbl">Trades</div>
@@ -190,9 +212,85 @@ function renderResults(r, sym, capital) {
       background:${pnl>=0?"var(--green-dim)":"var(--red-dim)"};
       border:1px solid ${pnl>=0?"rgba(0,232,122,.3)":"rgba(255,51,102,.3)"};
       font-size:11px;color:${pnl>=0?"var(--green)":"var(--red)"};text-align:center;font-weight:700">
-      ${pnl>=0?"✅ PROFITABLE":"❌ UNPROFITABLE"} — ${ret>=0?"+":""}${ret.toFixed(2)}% return on ₹${capital.toLocaleString("en-IN")}
+      ${pnl>=0?"✅ PROFITABLE":"❌ UNPROFITABLE"} — ${ret>=0?"+":""}${typeof ret === "number" ? ret.toFixed(2) : ret}% return on ₹${capital.toLocaleString("en-IN")}
     </div>
   `;
+
+  // ── Equity curve chart ──────────────────────────────────────────────────
+  const ec = r._equity_curve || [];
+  const equityCard = document.getElementById("equity-card");
+  if (ec.length >= 2) {
+    equityCard.style.display = "";
+    const labels = ec.map(p => p.date);
+    const values = ec.map(p => p.value);
+
+    // Build benchmark: buy-and-hold from initial capital
+    const initVal = values[0];
+    const finalBench = initVal * (1 + (r._benchmark_return || 0) / 100);
+    const benchValues = values.map((_, i) => initVal + (finalBench - initVal) * (i / (values.length - 1)));
+
+    const canvas = document.getElementById("equity-canvas");
+    // Destroy existing chart if any
+    if (canvas._chartInstance) { canvas._chartInstance.destroy(); }
+
+    const isProfit = values[values.length-1] >= initVal;
+    canvas._chartInstance = new Chart(canvas, {
+      type: "line",
+      data: {
+        labels,
+        datasets: [
+          {
+            label: "Portfolio",
+            data:  values,
+            borderColor: isProfit ? "var(--green)" : "var(--red)",
+            backgroundColor: isProfit ? "rgba(0,232,122,.08)" : "rgba(255,51,102,.08)",
+            borderWidth: 2,
+            pointRadius: 0,
+            fill: true,
+            tension: 0.3,
+          },
+          {
+            label: "Benchmark (B&H)",
+            data:  benchValues,
+            borderColor: "rgba(68,136,255,.6)",
+            borderWidth: 1,
+            borderDash: [4,4],
+            pointRadius: 0,
+            fill: false,
+            tension: 0.1,
+          },
+        ],
+      },
+      options: {
+        responsive: true,
+        maintainAspectRatio: false,
+        interaction: { intersect: false, mode: "index" },
+        plugins: {
+          legend: { display: false },
+          tooltip: {
+            callbacks: {
+              label: ctx => ctx.dataset.label + ": ₹" + ctx.raw.toLocaleString("en-IN", {maximumFractionDigits:0}),
+            },
+          },
+        },
+        scales: {
+          x: {
+            ticks: { maxTicksLimit: 8, color: "var(--txt-3)", font: { size: 9 } },
+            grid:  { color: "rgba(255,255,255,.04)" },
+          },
+          y: {
+            ticks: {
+              color: "var(--txt-3)", font: { size: 9 },
+              callback: v => "₹" + (v/1000).toFixed(0) + "k",
+            },
+            grid: { color: "rgba(255,255,255,.04)" },
+          },
+        },
+      },
+    });
+  } else {
+    equityCard.style.display = "none";
+  }
 }
 
 // Set default dates

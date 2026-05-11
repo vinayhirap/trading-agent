@@ -105,26 +105,122 @@ Ask me anything — or use the quick prompts above to get started.</div>
 
 {% block extra_js %}
 <script>
-let chatHistory = [], liveContext = "";
+let chatHistory = [], liveContext = "", _lastPrices = {}, _signals = {}, _fii = null, _regime = null, _portfolio = null, _accuracy = null;
 
-// Gather live market context for AI
-window.addEventListener("prices", e => {
-  const p = e.detail.prices;
-  const lines = Object.entries(p).slice(0,12).map(([sym,info]) =>
-    `${sym}: ${fmtDisplay(sym, info.display, info.label)} (${info.age<60?"fresh":info.age+"s old"})`
+// ── Enrich liveContext from all available data ────────────────────────────────
+function rebuildContext() {
+  const sections = [];
+
+  // Prices
+  const priceLines = Object.entries(_lastPrices).slice(0,14).map(([sym,info]) =>
+    sym + ": " + fmtDisplay(sym, info.display, info.label)
   );
-  liveContext = "Live prices:\n" + lines.join("\n");
+  if (priceLines.length) sections.push("LIVE PRICES:\n" + priceLines.join("\n"));
+
+  // Signals
+  const sigLines = Object.entries(_signals)
+    .filter(([,s]) => s.action && s.action !== "HOLD")
+    .sort((a,b) => (b[1].confidence||0) - (a[1].confidence||0))
+    .slice(0,10)
+    .map(([sym,s]) => {
+      const action = (s.recommended_instrument||s.action||"HOLD").toUpperCase();
+      const conf   = Math.round((s.confidence||0)*100);
+      const rsi    = s.rsi ? " RSI=" + parseFloat(s.rsi).toFixed(0) : "";
+      const regime = s.regime ? " [" + s.regime.replace(/_/g," ") + "]" : "";
+      return sym + ": " + action + " " + conf + "%" + rsi + regime;
+    });
+  if (sigLines.length) sections.push("AI SIGNALS:\n" + sigLines.join("\n"));
+
+  // FII/DII
+  if (_fii) {
+    const fii = _fii.fii_net || 0, dii = _fii.dii_net || 0;
+    if (fii !== 0 || dii !== 0) {
+      const fiiStr  = (fii >= 0 ? "+" : "") + "₹" + Math.abs(fii).toFixed(0) + " Cr";
+      const diiStr  = (dii >= 0 ? "+" : "") + "₹" + Math.abs(dii).toFixed(0) + " Cr";
+      const signal  = fii > 0 && dii > 0 ? "STRONG BULL" : fii < -2000 ? "BEAR ALERT" : fii > 0 ? "FII LED" : "MIXED";
+      sections.push("FII/DII FLOW (" + (_fii.date||"today") + "):\nFII: " + fiiStr + "  DII: " + diiStr + "  Signal: " + signal);
+    }
+  }
+
+  // Regime
+  if (_regime && _regime.regime) {
+    const r = _regime;
+    const adx = r.adx ? " ADX=" + parseFloat(r.adx).toFixed(0) : "";
+    const rsi = r.rsi ? " RSI=" + parseFloat(r.rsi).toFixed(0) : "";
+    sections.push("MARKET REGIME (NIFTY50): " + r.regime.replace(/_/g," ") + adx + rsi);
+  }
+
+  // Portfolio
+  if (_portfolio) {
+    const p = _portfolio;
+    const pnl = p.total_pnl || 0, pct = p.total_pnl_pct || 0;
+    sections.push(
+      "PAPER PORTFOLIO:\nValue: ₹" + (p.total_value||0).toLocaleString("en-IN") +
+      "  P&L: " + (pnl>=0?"+":"") + "₹" + Math.abs(pnl).toFixed(0) + " (" + (pct>=0?"+":"") + pct.toFixed(2) + "%)" +
+      "  Cash: ₹" + (p.cash||0).toLocaleString("en-IN") +
+      "  Positions: " + (p.n_positions||0)
+    );
+  }
+
+  // Accuracy
+  if (_accuracy && _accuracy.total > 0) {
+    const acc = (_accuracy.accuracy||0)*100;
+    const ev  = acc/100 * 1.5 - (1 - acc/100);
+    sections.push(
+      "MODEL ACCURACY: " + acc.toFixed(1) + "% (" + (_accuracy.correct||0) + "/" + _accuracy.total + " predictions)" +
+      "  EV=" + (ev>=0?"+":"") + ev.toFixed(3) + " at 1:1.5 R:R"
+    );
+  }
+
+  liveContext = sections.join("\n\n");
 
   // Update context panel
-  document.getElementById("ctx-panel").innerHTML = lines.map(l =>
-    `<div style="font-size:10px;font-family:var(--mono-font);color:var(--txt-2);border-bottom:1px solid var(--border);padding:3px 0">${l}</div>`
+  const panelLines = [
+    ...priceLines.slice(0,8),
+    ...(sigLines.length ? ["", "--- SIGNALS ---", ...sigLines.slice(0,5)] : []),
+    ...(_fii && (_fii.fii_net||0) !== 0 ? ["", "FII: " + ((_fii.fii_net||0)>=0?"+":"") + "₹" + Math.abs(_fii.fii_net||0).toFixed(0) + " Cr"] : []),
+    ...(_regime ? ["Regime: " + (_regime.regime||"—").replace(/_/g," ")] : []),
+  ];
+  document.getElementById("ctx-panel").innerHTML = panelLines.map(l =>
+    l.startsWith("---")
+      ? `<div style="font-size:9px;color:var(--txt-3);padding:4px 0;letter-spacing:.05em">${l}</div>`
+      : `<div style="font-size:10px;font-family:var(--mono-font);color:var(--txt-2);border-bottom:1px solid var(--border);padding:2px 0">${l}</div>`
   ).join("");
+}
+
+window.addEventListener("prices", e => {
+  _lastPrices = e.detail.prices;
+  rebuildContext();
 });
 
+// Pre-load signals, FII/DII, regime, portfolio, accuracy
+async function enrichContext() {
+  try {
+    const [sigR, fiiR, regR, pfR, accR] = await Promise.allSettled([
+      api("/api/signals?symbols=NIFTY50,BANKNIFTY,NIFTYIT,SENSEX,GOLD,SILVER,CRUDEOIL,COPPER,BTC,ETH,USDINR,RELIANCE,TCS,HDFCBANK,INFY"),
+      api("/api/fii-dii"),
+      api("/api/regime?symbol=NIFTY50"),
+      api("/api/portfolio"),
+      api("/api/accuracy"),
+    ]);
+    if (sigR.status === "fulfilled" && sigR.value?.ok) _signals   = sigR.value.signals || {};
+    if (fiiR.status === "fulfilled" && fiiR.value?.ok) _fii       = fiiR.value.today   || null;
+    if (regR.status === "fulfilled" && regR.value?.ok) _regime    = regR.value.regime   || regR.value || null;
+    if (pfR.status  === "fulfilled" && pfR.value?.ok)  _portfolio = pfR.value.portfolio || null;
+    if (accR.status === "fulfilled" && accR.value?.ok) _accuracy  = accR.value.overall  || null;
+    rebuildContext();
+  } catch(e) {}
+}
+
 async function loadMood() {
-  const data = await api("/api/signals?symbols=NIFTY50,BANKNIFTY,GOLD,BTC");
-  if (!data.ok) return;
-  const sigs = data.signals;
+  // Use already-fetched signals if available, otherwise fetch
+  let sigs = Object.keys(_signals).length >= 4 ? _signals : null;
+  if (!sigs) {
+    const data = await api("/api/signals?symbols=NIFTY50,BANKNIFTY,GOLD,BTC");
+    if (!data.ok) return;
+    sigs = data.signals;
+    _signals = {..._signals, ...sigs};
+  }
   const buys = Object.values(sigs).filter(s => {
     const a=(s.recommended_instrument||s.action||"").toUpperCase();
     return a.includes("BUY")||a.includes("CALL");
@@ -247,7 +343,9 @@ function sendQuick(q) {
   sendChat();
 }
 
+enrichContext();
 loadMood();
 setInterval(loadMood, 60000);
+setInterval(enrichContext, 120000);
 </script>
 {% endblock %}
