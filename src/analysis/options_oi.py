@@ -265,9 +265,19 @@ class OptionsOIAnalyzer:
                 pass
             return self._parse_chain(raw, nse_sym, n_strikes, expiry_index)
 
-        # Try parsing stale cache
+        # Angel One fallback when NSE blocked
+        angel_raw = self._fetch_angel_one(nse_sym)
+        if angel_raw:
+            try:
+                cache_key.write_text(json.dumps(angel_raw))
+            except Exception:
+                pass
+            return self._parse_chain(angel_raw, nse_sym, n_strikes, expiry_index)
+
+        # Stale cache last resort
         if cache_key.exists():
             try:
+                logger.info("Options: using stale cache for " + nse_sym)
                 return self._parse_cached(cache_key, nse_sym, n_strikes, expiry_index)
             except Exception:
                 pass
@@ -319,6 +329,66 @@ class OptionsOIAnalyzer:
             logger.warning(f"Options chain fetch failed: {e}")
 
         return None
+
+
+    # ── Angel One options fallback (P4-D) ────────────────────────────────────
+
+    def _fetch_angel_one(self, nse_sym):
+        """Fetch options chain from Angel One SmartAPI when NSE is unavailable."""
+        try:
+            from src.streaming.angel_one_ticker import angel_one_ticker
+            obj = getattr(angel_one_ticker, "_smart_api", None)
+            if obj is None:
+                return None
+            resp = obj.optionGreeks({
+                "name": nse_sym, "expirytype": "NEAR",
+                "strikecount": "20", "sessiontype": "FUT",
+            })
+            if not resp or resp.get("status") is False:
+                return None
+            data = resp.get("data", {})
+            if not data:
+                return None
+            spot         = float(data.get("underlyingValue", 0))
+            records_list = []
+            for row in data.get("optionGreeksData", []):
+                ce = row.get("CE", {})
+                pe = row.get("PE", {})
+                records_list.append({
+                    "strikePrice": float(row.get("strikePrice", 0)),
+                    "expiryDate":  row.get("expiryDate", ""),
+                    "CE": {
+                        "openInterest":         int(ce.get("openInterest", 0)),
+                        "changeinOpenInterest": int(ce.get("changeInOI", 0)),
+                        "lastPrice":            float(ce.get("ltp", 0)),
+                        "impliedVolatility":    float(ce.get("iv", 0)),
+                        "totalBuyQuantity":     int(ce.get("bidQty", 0)),
+                        "totalSellQuantity":    int(ce.get("askQty", 0)),
+                        "change":               float(ce.get("change", 0)),
+                    },
+                    "PE": {
+                        "openInterest":         int(pe.get("openInterest", 0)),
+                        "changeinOpenInterest": int(pe.get("changeInOI", 0)),
+                        "lastPrice":            float(pe.get("ltp", 0)),
+                        "impliedVolatility":    float(pe.get("iv", 0)),
+                        "totalBuyQuantity":     int(pe.get("bidQty", 0)),
+                        "totalSellQuantity":    int(pe.get("askQty", 0)),
+                        "change":               float(pe.get("change", 0)),
+                    },
+                })
+            if not records_list:
+                return None
+            expiries = sorted(set(r["expiryDate"] for r in records_list))
+            nse_fmt  = {"records": {
+                "underlyingValue": spot,
+                "expiryDates":     expiries,
+                "data":            records_list,
+            }}
+            logger.info("Options/Angel One: " + nse_sym + " " + str(len(records_list)) + " strikes")
+            return nse_fmt
+        except Exception as e:
+            logger.debug("Angel One options failed (" + nse_sym + "): " + str(e))
+            return None
 
     # ── Parsing ───────────────────────────────────────────────────────────────
 

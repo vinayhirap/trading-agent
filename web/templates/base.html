@@ -257,13 +257,53 @@ tr:hover td{background:var(--bg-3)}
 .up{color:var(--green)}.dn{color:var(--red)}
 .dim{color:var(--txt-2)}
 
+/* ── Hamburger button (mobile only) ─────────────────────────── */
+.hamburger{
+  display:none;align-items:center;justify-content:center;
+  width:32px;height:32px;border-radius:6px;border:1px solid var(--border);
+  background:var(--bg-2);cursor:pointer;flex-shrink:0;
+  font-size:16px;color:var(--txt-2);margin-right:4px
+}
+.sidebar-overlay{
+  display:none;position:fixed;inset:0;background:rgba(0,0,0,.6);
+  z-index:98;backdrop-filter:blur(2px)
+}
+.sidebar-overlay.active{display:block}
+
 /* ── Responsive ─────────────────────────────────────────────── */
-@media(max-width:768px){
+@media(max-width:900px){
   .shell{grid-template-columns:1fr}
-  .sidebar{display:none}
+  .sidebar{
+    display:flex;position:fixed;left:-240px;top:0;bottom:0;
+    width:240px;z-index:99;padding-top:56px;
+    transition:left .25s cubic-bezier(.4,0,.2,1);
+    box-shadow:none;
+  }
+  .sidebar.mobile-open{left:0;box-shadow:8px 0 32px rgba(0,0,0,.5)}
+  .hamburger{display:flex}
   .g4{grid-template-columns:1fr 1fr}
-  .g3,.g2{grid-template-columns:1fr}
+  .g3{grid-template-columns:1fr 1fr}
+  .g2{grid-template-columns:1fr}
+  .ticker-strip{
+    gap:1px;
+    font-size:10px;
+  }
+  .t-chip{padding:4px 6px}
+  .t-val{font-size:11px}
+  .t-chg{display:none}
+  .kpi-row{grid-template-columns:1fr 1fr !important}
+  .clock{display:none}
+  .page-title{font-size:16px}
+  .page-hd{flex-wrap:wrap;gap:8px}
+}
+@media(max-width:480px){
+  .g4,.g3{grid-template-columns:1fr}
   .ticker-strip{display:none}
+  .kpi-row{grid-template-columns:1fr 1fr !important}
+  .topbar{padding:0 10px;gap:8px}
+  .logo-name{display:none}
+  .mkt-badge{font-size:9px;padding:3px 7px}
+  .page-content{padding:10px}
 }
 
 {% block extra_css %}{% endblock %}
@@ -274,7 +314,9 @@ tr:hover td{background:var(--bg-3)}
 <div class="shell">
 
 <!-- ═══ TOPBAR ═══════════════════════════════════════════════ -->
+<div class="sidebar-overlay" id="sidebar-overlay" onclick="closeSidebar()"></div>
 <header class="topbar">
+  <button class="hamburger" id="hamburger-btn" onclick="toggleSidebar()" aria-label="Menu">☰</button>
   <a href="/" class="logo">
     <div class="logo-mark">⚡</div>
     <span class="logo-name">AI Trading</span>
@@ -486,6 +528,30 @@ window.api = async (url, method="GET", body=null) => {
     return {ok:false,error:e.message};
   }
 };
+
+// ── Mobile sidebar toggle ────────────────────────────────────
+function toggleSidebar() {
+  const sb  = document.querySelector('.sidebar');
+  const ov  = document.getElementById('sidebar-overlay');
+  const btn = document.getElementById('hamburger-btn');
+  const open = sb.classList.toggle('mobile-open');
+  ov.classList.toggle('active', open);
+  btn.textContent = open ? '✕' : '☰';
+}
+function closeSidebar() {
+  const sb  = document.querySelector('.sidebar');
+  const ov  = document.getElementById('sidebar-overlay');
+  const btn = document.getElementById('hamburger-btn');
+  sb.classList.remove('mobile-open');
+  ov.classList.remove('active');
+  btn.textContent = '☰';
+}
+// Close sidebar on nav link click (mobile)
+document.querySelectorAll('.nav-link').forEach(a => {
+  a.addEventListener('click', () => {
+    if (window.innerWidth <= 900) closeSidebar();
+  });
+});
 </script>
 
 {% block extra_js %}{% endblock %}

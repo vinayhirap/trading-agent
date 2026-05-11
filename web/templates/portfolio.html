@@ -19,6 +19,15 @@
   </div>
 </div>
 
+<!-- Source switcher -->
+<div style="display:flex;gap:6px;margin-bottom:14px;align-items:center">
+  <span style="font-size:11px;color:var(--txt-3)">Source:</span>
+  <button class="btn btn-ghost btn-sm" id="src-paper" onclick="switchSource('paper')" style="border-color:var(--green);color:var(--green)">📄 Paper</button>
+  <button class="btn btn-ghost btn-sm" id="src-groww" onclick="switchSource('groww')">📊 Groww Holdings</button>
+  <button class="btn btn-ghost btn-sm" id="src-all"   onclick="switchSource('all')">🔀 Combined</button>
+  <span id="src-status" style="font-size:10px;color:var(--txt-3);margin-left:4px"></span>
+</div>
+
 <!-- Portfolio KPIs -->
 <div class="kpi-row" style="grid-template-columns:repeat(6,1fr);margin-bottom:18px">
   <div class="kpi"><div class="kpi-lbl">Portfolio Value</div><div class="kpi-val" id="k-value">—</div></div>
@@ -96,12 +105,52 @@ function fmt(v) {
 }
 function fmtPct(v) { return v !== null && v !== undefined ? (v>=0?"+":"")+v.toFixed(2)+"%" : "—"; }
 
+let _currentSource = 'paper';
+
+function switchSource(src) {
+  _currentSource = src;
+  ['paper','groww','all'].forEach(s => {
+    const btn = document.getElementById('src-' + s);
+    if (btn) {
+      btn.style.borderColor = s === src ? 'var(--green)' : '';
+      btn.style.color       = s === src ? 'var(--green)' : '';
+    }
+  });
+  loadPortfolio();
+}
+
 async function loadPortfolio() {
-  const data = await api("/api/portfolio");
+  const data = await api("/api/portfolio?source=" + _currentSource);
   document.getElementById("pf-time").textContent = "Updated " + new Date().toLocaleTimeString();
-  if (!data.ok || !data.portfolio) {
-    toast("Failed to load portfolio","err"); return;
+  if (!data.ok) { toast("Failed to load portfolio","err"); return; }
+
+  // For source=all, show combined summary
+  if (_currentSource === 'all') {
+    const paper = data.paper || {};
+    const groww = data.groww || {};
+    const hasGroww = !groww.error && groww.total_value > 0;
+    const totalVal = (paper.total_value || 0) + (hasGroww ? groww.total_value : 0);
+    const totalPnl = (paper.total_pnl  || 0) + (hasGroww ? groww.total_pnl  : 0);
+    document.getElementById("src-status").textContent = hasGroww
+      ? "Paper + Groww live holdings"
+      : "Groww: " + (groww.error || "no data");
+    // Render Groww holdings if available
+    if (hasGroww && groww.holdings) renderGrowwHoldings(groww.holdings);
+    // Fall through to render paper portfolio below
+    data.portfolio = paper;
+  } else if (_currentSource === 'groww') {
+    const g = data.portfolio || {};
+    if (g.error) { toast("Groww: " + g.error, "err"); return; }
+    document.getElementById("src-status").textContent = "Live from groww_holdings.json";
+    if (g.holdings) renderGrowwHoldings(g.holdings);
+    // Show groww summary in KPIs
+    renderGrowwKpis(g);
+    return;
+  } else {
+    document.getElementById("src-status").textContent = "";
   }
+
+  if (!data.portfolio) { toast("No portfolio data","err"); return; }
   const p = data.portfolio;
   const pnl     = p.total_pnl || 0;
   const pnlPct  = p.total_pnl_pct || (pnl / 10000 * 100);
@@ -235,6 +284,61 @@ function renderAllocation(p) {
       Initial capital: ₹10,000 · Daily loss limit: 2%
     </div>
   `;
+}
+
+function renderGrowwKpis(g) {
+  document.getElementById("k-value").textContent  = fmt(g.total_value);
+  document.getElementById("k-cash").textContent   = "—";
+  document.getElementById("k-pos").textContent    = (g.holdings || []).length;
+  document.getElementById("k-trades").textContent = "—";
+  const pnl = g.total_pnl || 0, pct = g.total_pnl_pct || 0;
+  const pnlEl = document.getElementById("k-pnl");
+  pnlEl.textContent = (pnl>=0?"+":"")+fmt(Math.abs(pnl));
+  pnlEl.className   = "kpi-val " + (pnl>=0?"up":"dn");
+  const pctEl = document.getElementById("k-pnl-pct");
+  pctEl.textContent = (pct>=0?"+":"")+pct.toFixed(2)+"%";
+  pctEl.className   = "kpi-val " + (pct>=0?"up":"dn");
+  document.getElementById("positions-list").innerHTML =
+    (g.holdings||[]).map(h => {
+      const pnlCls = h.pnl >= 0 ? "up" : "dn";
+      return `<div class="pos-card long">
+        <div style="display:flex;justify-content:space-between;align-items:flex-start">
+          <div>
+            <div style="font-size:14px;font-weight:700;color:var(--txt)">${h.symbol}</div>
+            <div style="font-size:10px;color:var(--txt-3)">${h.name} · Qty: ${h.quantity} · Avg: ₹${h.avg_buy_price?.toLocaleString("en-IN")}</div>
+          </div>
+          <div style="text-align:right">
+            <div class="${pnlCls}" style="font-size:14px;font-weight:700;font-family:var(--mono-font)">${h.pnl>=0?"+":""}${fmt(Math.abs(h.pnl))}</div>
+            <div class="${pnlCls}" style="font-size:10px">${h.pnl_pct>=0?"+":""}${h.pnl_pct?.toFixed(2)}%</div>
+          </div>
+        </div>
+        <div class="pnl-bar"><div style="width:${Math.min(Math.abs(h.pnl_pct||0)*5,100)}%;height:100%;background:${h.pnl>=0?"var(--green)":"var(--red)"};border-radius:2px"></div></div>
+        <div style="display:flex;justify-content:space-between;margin-top:8px;font-size:10px;color:var(--txt-3)">
+          <span>Invested: ₹${h.invested_value?.toLocaleString("en-IN")}</span>
+          <span>Current: ₹${h.current_price?.toLocaleString("en-IN")}</span>
+        </div>
+      </div>`;
+    }).join("") || `<div class="card" style="color:var(--txt-3);text-align:center;padding:24px">No Groww holdings found</div>`;
+}
+
+function renderGrowwHoldings(holdings) {
+  // Append Groww section under positions
+  const existing = document.getElementById("groww-holdings-section");
+  if (existing) existing.remove();
+  if (!holdings?.length) return;
+  const section = document.createElement("div");
+  section.id = "groww-holdings-section";
+  section.innerHTML = `<div class="card-hd" style="margin:14px 0 8px">📊 Groww Live Holdings</div>
+    <div style="display:flex;flex-direction:column;gap:6px">
+      ${holdings.map(h => `<div style="display:flex;justify-content:space-between;align-items:center;padding:7px 10px;background:var(--bg-3);border-radius:5px">
+        <div><div style="font-size:12px;font-weight:600;color:var(--txt)">${h.symbol}</div>
+          <div style="font-size:10px;color:var(--txt-3)">${h.name} · ${h.quantity} shares</div></div>
+        <div style="text-align:right">
+          <div class="${h.pnl>=0?"up":"dn"}" style="font-size:12px;font-weight:700">${h.pnl>=0?"+":""}${fmt(Math.abs(h.pnl))}</div>
+          <div style="font-size:10px;color:var(--txt-3)">₹${h.current_price?.toLocaleString("en-IN")}</div>
+        </div></div>`).join("")}
+    </div>`;
+  document.querySelector('.g2').appendChild(section);
 }
 
 loadPortfolio();
