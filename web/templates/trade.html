@@ -159,18 +159,52 @@ function setMode(m) {
 }
 
 async function getRLSize() {
-  const sym  = document.getElementById("t-sym").value;
+  const sym = document.getElementById("t-sym").value;
+
+  // Pull live signal data for context
+  let regime = "RANGING", confidence = 0.6, rsi = 50, atr_pct = 1.5;
+  try {
+    const sigData = await api(`/api/signals?symbols=${sym}`);
+    if (sigData.ok && sigData.signals?.[sym]) {
+      const s    = sigData.signals[sym];
+      regime     = (s.regime || "RANGING").replace(/ /g, "_");
+      confidence = s.confidence || 0.6;
+      rsi        = s.rsi        || 50;
+      atr_pct    = s.atr_pct    || 1.5;
+    }
+  } catch(e) {}
+
+  // Get portfolio drawdown from portfolio state
+  let drawdown = 0;
+  try {
+    const pfData = await api("/api/portfolio");
+    if (pfData.ok && pfData.portfolio) {
+      const pnl_pct = pfData.portfolio.total_pnl_pct || 0;
+      drawdown = pnl_pct < 0 ? Math.abs(pnl_pct) / 100 : 0;
+    }
+  } catch(e) {}
+
   const data = await api("/api/rl-sizer", "POST", {
-    regime: "RANGING_LOW", confidence: 0.6,
-    atr_ratio: 1.0, rsi: 50, win_rate: 0.5,
-    drawdown: 0.0, util: 0.0, fii_signal: 0.0,
+    regime, confidence, rsi,
+    atr_pct:  atr_pct / 100,
+    win_rate: 0.55,
+    drawdown,
   });
   const el = document.getElementById("rl-size-val");
   if (data.ok) {
-    el.textContent = `${data.size_pct}% · ₹${data.size_inr?.toLocaleString("en-IN")}`;
-    toast(`RL Sizer: ${data.size_pct}% of capital`, "inf");
+    const note = data.fallback ? " (heuristic)" : "";
+    el.textContent = `${data.size_pct}% · ₹${data.size_inr?.toLocaleString("en-IN")}${note}`;
+    el.style.color = data.size_pct >= 2 ? "var(--green)" : "var(--txt-2)";
+    // Auto-fill quantity if price is set
+    const price = parseFloat(document.getElementById("t-price").value);
+    if (price > 0 && data.size_inr > 0) {
+      const qty = Math.max(1, Math.floor(data.size_inr / price));
+      document.getElementById("t-qty").value = qty;
+    }
+    toast(`RL Sizer [${sym}]: ${data.size_pct}% — ${regime.replace(/_/g," ")} regime`, "inf");
   } else {
     el.textContent = "unavailable";
+    el.style.color = "var(--txt-3)";
   }
 }
 
@@ -315,5 +349,31 @@ document.getElementById("t-sl").addEventListener("input",    updatePreview);
 document.getElementById("t-target").addEventListener("input",updatePreview);
 
 onSymChange();
+
+// ── Pre-fill from scanner quick-trade URL params ──────────────────────────
+(function() {
+  const p = new URLSearchParams(window.location.search);
+  if (p.has("sym")) {
+    const symSel = document.getElementById("t-sym");
+    if ([...symSel.options].some(o => o.value === p.get("sym")))
+      symSel.value = p.get("sym");
+  }
+  if (p.has("side")) {
+    const side = p.get("side");
+    document.getElementById("mode-buy").style.borderColor  = side==="BUY"  ? "var(--green)" : "";
+    document.getElementById("mode-sell").style.borderColor = side==="SELL" ? "var(--red)"   : "";
+    document.getElementById("mode-buy").style.color  = side==="BUY"  ? "var(--green)" : "";
+    document.getElementById("mode-sell").style.color = side==="SELL" ? "var(--red)"   : "";
+    currentSide = side;
+  }
+  if (p.has("price"))  document.getElementById("t-price").value  = p.get("price");
+  if (p.has("sl"))     document.getElementById("t-sl").value     = p.get("sl");
+  if (p.has("target")) document.getElementById("t-target").value = p.get("target");
+  if (p.has("sym") || p.has("price")) {
+    onSymChange();
+    updatePreview();
+    toast("Pre-filled from Signal Scanner", "inf");
+  }
+})();
 </script>
 {% endblock %}

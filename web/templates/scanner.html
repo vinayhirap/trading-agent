@@ -68,10 +68,11 @@
           <th>Entry</th>
           <th>SL</th>
           <th>Target</th>
+          <th>Trade</th>
         </tr>
       </thead>
       <tbody id="scan-tbody">
-        <tr><td colspan="13" style="text-align:center;padding:40px;color:var(--txt-3)">
+        <tr><td colspan="14" style="text-align:center;padding:40px;color:var(--txt-3)">
           <div style="display:flex;align-items:center;justify-content:center;gap:8px">
             <div class="spin"></div> Scanning markets…
           </div>
@@ -104,7 +105,7 @@ window.addEventListener("prices", e => { latestPrices = e.detail.prices; });
 
 async function loadAll() {
   document.getElementById("scan-tbody").innerHTML =
-    `<tr><td colspan="13" style="text-align:center;padding:40px;color:var(--txt-3)">
+    `<tr><td colspan="14" style="text-align:center;padding:40px;color:var(--txt-3)">
       <div style="display:flex;align-items:center;justify-content:center;gap:8px">
         <div class="spin"></div> Scanning ${ALL_SYMS.length} symbols…
       </div></td></tr>`;
@@ -177,7 +178,7 @@ function sortBy(col) {
 function renderTable(rows) {
   if (!rows.length) {
     document.getElementById("scan-tbody").innerHTML =
-      `<tr><td colspan="13" style="text-align:center;padding:24px;color:var(--txt-3)">No signals match filters</td></tr>`;
+      `<tr><td colspan="14" style="text-align:center;padding:24px;color:var(--txt-3)">No signals match filters</td></tr>`;
     return;
   }
   document.getElementById("scan-tbody").innerHTML = rows.map(r => {
@@ -219,8 +220,23 @@ function renderTable(rows) {
       <td class="up" style="font-size:10px">${r.entry||"—"}</td>
       <td class="dn" style="font-size:10px">${sl}</td>
       <td class="up" style="font-size:10px">${target}</td>
+      <td>
+        ${isBuy || isSell ? `<button
+          onclick="quickTrade('${r.sym}','${rec.includes('BUY')?'BUY':'SELL'}',${r.price||0},${r.stop_loss||0},${r.target||0},${r.confidence||0.5})"
+          style="font-size:9px;padding:3px 8px;border-radius:4px;border:1px solid ${isBuy?'var(--green)':'var(--red)'};
+            color:${isBuy?'var(--green)':'var(--red)'};background:transparent;cursor:pointer;white-space:nowrap"
+          class="btn btn-ghost btn-sm">
+          ${isBuy?'▲ BUY':'▼ SELL'}
+        </button>` : '<span class="dim" style="font-size:10px">—</span>'}
+      </td>
     </tr>`;
   }).join("");
+}
+
+async function quickTrade(sym, side, price, sl, target, confidence) {
+  // Redirect to trade page with pre-filled params
+  const params = new URLSearchParams({ sym, side, price, sl, target, confidence: Math.round(confidence*100) });
+  window.location.href = `/trade?${params.toString()}`;
 }
 
 loadAll();
