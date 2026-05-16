@@ -1,18 +1,390 @@
 {
   "index": {
-    "accuracy": 0.0,
-    "error": "No module named 'src.features.indicators'"
+    "accuracy": 59.4,
+    "accuracy_std": 6.6,
+    "n_symbols": 5,
+    "n_bars": 3180,
+    "n_features": 84,
+    "n_folds_completed": 7,
+    "label_horizon": 5,
+    "fold_accuracies": [
+      48.9,
+      71.3,
+      64.7,
+      60.7,
+      56.4,
+      57.2,
+      56.7
+    ],
+    "fold_details": [
+      {
+        "fold": 1,
+        "accuracy": 0.4887,
+        "n_correct": 194,
+        "n_total": 397,
+        "n_train": 396,
+        "buy_precision": 0.026,
+        "sell_precision": 0.267
+      },
+      {
+        "fold": 2,
+        "accuracy": 0.7128,
+        "n_correct": 283,
+        "n_total": 397,
+        "n_train": 793,
+        "buy_precision": 0.105,
+        "sell_precision": 0.424
+      },
+      {
+        "fold": 3,
+        "accuracy": 0.6474,
+        "n_correct": 257,
+        "n_total": 397,
+        "n_train": 1190,
+        "buy_precision": 0.167,
+        "sell_precision": 0.6
+      },
+      {
+        "fold": 4,
+        "accuracy": 0.6071,
+        "n_correct": 241,
+        "n_total": 397,
+        "n_train": 1587,
+        "buy_precision": 0.167,
+        "sell_precision": 0.289
+      },
+      {
+        "fold": 5,
+        "accuracy": 0.5642,
+        "n_correct": 224,
+        "n_total": 397,
+        "n_train": 1984,
+        "buy_precision": 0.2,
+        "sell_precision": 0.36
+      },
+      {
+        "fold": 6,
+        "accuracy": 0.5718,
+        "n_correct": 227,
+        "n_total": 397,
+        "n_train": 2381,
+        "buy_precision": 0.303,
+        "sell_precision": 0.306
+      },
+      {
+        "fold": 7,
+        "accuracy": 0.5668,
+        "n_correct": 225,
+        "n_total": 397,
+        "n_train": 2778,
+        "buy_precision": 0.071,
+        "sell_precision": 0.712
+      }
+    ],
+    "symbols_ok": [
+      "NIFTY50",
+      "BANKNIFTY",
+      "NIFTYIT",
+      "SENSEX",
+      "NIFTYMID"
+    ],
+    "symbols_failed": [],
+    "model_path": "D:\\Project\\trading-agent\\trading-agent\\models\\ensemble_index.pkl"
   },
   "equity": {
-    "accuracy": 0.0,
-    "error": "No module named 'src.features.indicators'"
+    "accuracy": 51.0,
+    "accuracy_std": 6.0,
+    "n_symbols": 25,
+    "n_bars": 14870,
+    "n_features": 85,
+    "n_folds_completed": 7,
+    "label_horizon": 7,
+    "fold_accuracies": [
+      52.4,
+      61.8,
+      44.2,
+      55.6,
+      49.6,
+      50.4,
+      43.2
+    ],
+    "fold_details": [
+      {
+        "fold": 1,
+        "accuracy": 0.524,
+        "n_correct": 973,
+        "n_total": 1858,
+        "n_train": 1857,
+        "buy_precision": 0.316,
+        "sell_precision": 0.379
+      },
+      {
+        "fold": 2,
+        "accuracy": 0.618,
+        "n_correct": 1148,
+        "n_total": 1858,
+        "n_train": 3715,
+        "buy_precision": 0.311,
+        "sell_precision": 0.634
+      },
+      {
+        "fold": 3,
+        "accuracy": 0.442,
+        "n_correct": 821,
+        "n_total": 1858,
+        "n_train": 5573,
+        "buy_precision": 0.391,
+        "sell_precision": 0.279
+      },
+      {
+        "fold": 4,
+        "accuracy": 0.556,
+        "n_correct": 1033,
+        "n_total": 1858,
+        "n_train": 7431,
+        "buy_precision": 0.083,
+        "sell_precision": 0.686
+      },
+      {
+        "fold": 5,
+        "accuracy": 0.496,
+        "n_correct": 921,
+        "n_total": 1858,
+        "n_train": 9289,
+        "buy_precision": 0.165,
+        "sell_precision": 0.293
+      },
+      {
+        "fold": 6,
+        "accuracy": 0.504,
+        "n_correct": 936,
+        "n_total": 1858,
+        "n_train": 11147,
+        "buy_precision": 0.385,
+        "sell_precision": 0.272
+      },
+      {
+        "fold": 7,
+        "accuracy": 0.432,
+        "n_correct": 802,
+        "n_total": 1858,
+        "n_train": 13005,
+        "buy_precision": 0.326,
+        "sell_precision": 0.264
+      }
+    ],
+    "symbols_ok": [
+      "RELIANCE",
+      "TCS",
+      "HDFCBANK",
+      "INFY",
+      "ICICIBANK",
+      "SBIN",
+      "WIPRO",
+      "AXISBANK",
+      "KOTAKBANK",
+      "LT",
+      "BAJFINANCE",
+      "MARUTI",
+      "SUNPHARMA",
+      "BHARTIARTL",
+      "TATASTEEL",
+      "JSWSTEEL",
+      "ONGC",
+      "NTPC",
+      "ASIANPAINT",
+      "DRREDDY",
+      "BAJAJFINSV",
+      "ULTRACEMCO",
+      "COALINDIA",
+      "POWERGRID",
+      "HINDALCO"
+    ],
+    "symbols_failed": [],
+    "model_path": "D:\\Project\\trading-agent\\trading-agent\\models\\ensemble_equity.pkl"
   },
   "futures": {
-    "accuracy": 0.0,
-    "error": "No module named 'src.features.indicators'"
+    "accuracy": 53.9,
+    "accuracy_std": 4.9,
+    "n_symbols": 5,
+    "n_bars": 2576,
+    "n_features": 83,
+    "n_folds_completed": 7,
+    "label_horizon": 7,
+    "fold_accuracies": [
+      54.7,
+      45.3,
+      53.4,
+      49.1,
+      55.9,
+      57.1,
+      61.5
+    ],
+    "fold_details": [
+      {
+        "fold": 1,
+        "accuracy": 0.5466,
+        "n_correct": 176,
+        "n_total": 322,
+        "n_train": 315,
+        "buy_precision": 0.308,
+        "sell_precision": 0.292
+      },
+      {
+        "fold": 2,
+        "accuracy": 0.4534,
+        "n_correct": 146,
+        "n_total": 322,
+        "n_train": 637,
+        "buy_precision": 0.278,
+        "sell_precision": 0.098
+      },
+      {
+        "fold": 3,
+        "accuracy": 0.5342,
+        "n_correct": 172,
+        "n_total": 322,
+        "n_train": 959,
+        "buy_precision": 0.194,
+        "sell_precision": 0.5
+      },
+      {
+        "fold": 4,
+        "accuracy": 0.4907,
+        "n_correct": 158,
+        "n_total": 322,
+        "n_train": 1281,
+        "buy_precision": 0.548,
+        "sell_precision": 0.225
+      },
+      {
+        "fold": 5,
+        "accuracy": 0.559,
+        "n_correct": 179,
+        "n_total": 322,
+        "n_train": 1603,
+        "buy_precision": 0.303,
+        "sell_precision": 0.091
+      },
+      {
+        "fold": 6,
+        "accuracy": 0.5714,
+        "n_correct": 184,
+        "n_total": 322,
+        "n_train": 1925,
+        "buy_precision": 0.288,
+        "sell_precision": 0.306
+      },
+      {
+        "fold": 7,
+        "accuracy": 0.6149,
+        "n_correct": 198,
+        "n_total": 322,
+        "n_train": 2247,
+        "buy_precision": 0.387,
+        "sell_precision": 0.344
+      }
+    ],
+    "symbols_ok": [
+      "GOLD",
+      "SILVER",
+      "CRUDEOIL",
+      "COPPER",
+      "NATURALGAS"
+    ],
+    "symbols_failed": [],
+    "model_path": "D:\\Project\\trading-agent\\trading-agent\\models\\ensemble_futures.pkl"
   },
   "crypto": {
-    "accuracy": 0.0,
-    "error": "No module named 'src.features.indicators'"
+    "accuracy": 46.5,
+    "accuracy_std": 4.1,
+    "n_symbols": 5,
+    "n_bars": 4860,
+    "n_features": 83,
+    "n_folds_completed": 7,
+    "label_horizon": 3,
+    "fold_accuracies": [
+      47.4,
+      40.2,
+      44.6,
+      53.4,
+      44.0,
+      45.2,
+      50.8
+    ],
+    "fold_details": [
+      {
+        "fold": 1,
+        "accuracy": 0.474,
+        "n_correct": 287,
+        "n_total": 607,
+        "n_train": 608,
+        "buy_precision": 0.231,
+        "sell_precision": 0.415
+      },
+      {
+        "fold": 2,
+        "accuracy": 0.402,
+        "n_correct": 244,
+        "n_total": 607,
+        "n_train": 1215,
+        "buy_precision": 0.162,
+        "sell_precision": 0.327
+      },
+      {
+        "fold": 3,
+        "accuracy": 0.446,
+        "n_correct": 270,
+        "n_total": 607,
+        "n_train": 1822,
+        "buy_precision": 0.368,
+        "sell_precision": 0.382
+      },
+      {
+        "fold": 4,
+        "accuracy": 0.534,
+        "n_correct": 324,
+        "n_total": 607,
+        "n_train": 2429,
+        "buy_precision": 0.121,
+        "sell_precision": 0.603
+      },
+      {
+        "fold": 5,
+        "accuracy": 0.44,
+        "n_correct": 267,
+        "n_total": 607,
+        "n_train": 3036,
+        "buy_precision": 0.362,
+        "sell_precision": 0.4
+      },
+      {
+        "fold": 6,
+        "accuracy": 0.452,
+        "n_correct": 274,
+        "n_total": 607,
+        "n_train": 3643,
+        "buy_precision": 0.208,
+        "sell_precision": 0.547
+      },
+      {
+        "fold": 7,
+        "accuracy": 0.508,
+        "n_correct": 308,
+        "n_total": 607,
+        "n_train": 4250,
+        "buy_precision": 0.231,
+        "sell_precision": 0.554
+      }
+    ],
+    "symbols_ok": [
+      "BTC",
+      "ETH",
+      "BNB",
+      "SOL",
+      "XRP"
+    ],
+    "symbols_failed": [],
+    "model_path": "D:\\Project\\trading-agent\\trading-agent\\models\\ensemble_crypto.pkl"
   }
 }

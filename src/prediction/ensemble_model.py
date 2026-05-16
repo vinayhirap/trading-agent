@@ -193,7 +193,10 @@ class EnsembleModel:
         if regime_series is not None:
             # Train per-regime models
             for regime in Regime:
-                mask = (regime_series == regime).to_numpy()
+                # Use .value for pandas Series comparison
+                # str(Regime.BULL_TREND) = "Regime.BULL_TREND" — wrong
+                # Regime.BULL_TREND.value = "BULL_TREND" — correct
+                mask = (regime_series == regime.value).to_numpy()
                 n_regime = int(mask.sum())
                 if n_regime < 50:
                     logger.warning(f"Skipping {regime.value}: only {n_regime} bars")
@@ -214,7 +217,7 @@ class EnsembleModel:
 
         # Always train a global fallback model
         logger.info("Training global fallback ensemble...")
-        xgb_global_p = self.REGIME_XGB_DEFAULTS[Regime.RANGING].copy()
+        xgb_global_p = self.REGIME_XGB_DEFAULTS[Regime.RANGING_LOW].copy()  # fallback uses RANGING_LOW params
         xgb_global_p.update({
             "objective": "multi:softprob", "num_class": 3,
             "verbosity": 0, "random_state": 42, "n_jobs": -1,
@@ -222,7 +225,7 @@ class EnsembleModel:
         self._global_xgb = self._train_xgb(X, y_enc, xgb_global_p, sample_weight=sample_weight)
 
         if self._has_lgb:
-            lgb_global_p = self.REGIME_LGB_DEFAULTS[Regime.RANGING].copy()
+            lgb_global_p = self.REGIME_LGB_DEFAULTS[Regime.RANGING_LOW].copy()  # fallback uses RANGING_LOW params
             lgb_global_p.update({
                 "objective": "multiclass", "num_class": 3,
                 "verbosity": -1, "random_state": 42,

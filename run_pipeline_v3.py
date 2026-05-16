@@ -425,13 +425,29 @@ def train_asset_class(ac_name, skip_tuning=False, dry_run=False, debug=False):
 
 
 def _regime_code(rd, close_series):
-    """Map regime string to numeric code for pandas rolling apply."""
+    """Map regime string to numeric code for pandas rolling apply.
+    
+    Must match EnsembleModel.fit() expectations.
+    EnsembleModel iterates over Regime enum values: BULL_TREND, BEAR_TREND, RANGING_LOW, RANGING_HIGH
+    The regime_series is compared directly: (regime_series == regime).to_numpy()
+    So values must be the exact enum value strings.
+    """
     try:
         result = rd.detect(close_series)
-        regime = getattr(result, "regime", "RANGING")
-        return {"TRENDING_UP": 2, "TRENDING_DOWN": -2, "RANGING": 1, "VOLATILE": 0}.get(regime, 1)
+        regime = getattr(result, "regime", "RANGING_LOW")
+        # Map to exact Regime enum strings used in ensemble_model.py
+        mapping = {
+            "BULL_TREND":   "BULL_TREND",
+            "BEAR_TREND":   "BEAR_TREND",
+            "RANGING_LOW":  "RANGING_LOW",
+            "RANGING_HIGH": "RANGING_HIGH",
+            # Legacy / fallback aliases
+            "RANGING":      "RANGING_LOW",
+            "VOLATILE":     "RANGING_HIGH",
+        }
+        return mapping.get(str(regime), "RANGING_LOW")
     except Exception:
-        return 1
+        return "RANGING_LOW"
 
 
 def _select_features(X, y):

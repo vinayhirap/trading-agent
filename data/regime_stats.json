@@ -1,8 +1,11 @@
 {
   "counts": {
-    "RANGING_LOW": 24600
+    "RANGING_LOW": 61231,
+    "BULL_TREND": 9788,
+    "RANGING_HIGH": 651,
+    "BEAR_TREND": 630
   },
-  "total": 24600,
+  "total": 72300,
   "last_regime": "RANGING_LOW",
-  "last_confidence": 0.55
+  "last_confidence": 0.558
 }
